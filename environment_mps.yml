@@ -1,4 +1,4 @@
-name: ifh-gen
+name: d4-gen
 channels:
   - conda-forge
 dependencies:
