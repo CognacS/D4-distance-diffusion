@@ -1,0 +1,8 @@
+name: qm9
+params:
+    random_splits:
+        train: null
+        valid: 10000
+        test: 10000
+    include_pos: true
+    include_charges: true

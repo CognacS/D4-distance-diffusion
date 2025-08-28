@@ -1,0 +1,4 @@
+defaults:
+    - transforms@train: to_undirected
+    - transforms@valid: to_undirected
+    - transforms@test: to_undirected

@@ -1,0 +1,4 @@
+defaults:
+  - dataset: qm9_dig
+  - pre_transform: to_onehot
+  - test: molecular

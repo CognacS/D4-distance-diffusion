@@ -1,0 +1,4 @@
+defaults:
+  - dataset: zinc
+  - pre_transform: to_onehot
+  - test: molecular

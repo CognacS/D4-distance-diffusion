@@ -1,0 +1,4 @@
+name: ConstantModel
+params:
+    output_type: classifier
+    value: 1.

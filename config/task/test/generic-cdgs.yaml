@@ -1,0 +1,4 @@
+graph:
+    profile: cdgs
+    how_many_to_generate: ???
+    no_computational_metrics: false

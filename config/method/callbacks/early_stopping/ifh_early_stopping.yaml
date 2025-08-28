@@ -1,0 +1,13 @@
+ModularEarlyStopping:
+    module_monitors:
+        reinsertion:
+            monitor: valid_reinsertion/reinsertion_loss_kldiv
+            mode: min
+        denoising:
+            monitor: valid_denoising/denoising_loss_total_ce
+            mode: min
+        halting:
+            monitor: valid_halting/halting_prior_emd
+            mode: min
+    verbose: true
+    patience: 10

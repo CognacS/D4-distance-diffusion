@@ -1,0 +1,5 @@
+name: CommunityWrapperDataset
+params:
+  max_comm_size: 64
+  max_res: 2.0
+  n_jobs: 8

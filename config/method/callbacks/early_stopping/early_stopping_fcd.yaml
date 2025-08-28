@@ -1,0 +1,5 @@
+EarlyStopping:
+    monitor: valid/fcd
+    mode: min
+    verbose: true
+    patience: 20

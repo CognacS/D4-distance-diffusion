@@ -1,0 +1,19 @@
+train:
+    batch_size: 512
+    shuffle: true
+    pin_memory: true
+    num_workers: 4
+    persistent_workers: true
+    drop_last: true
+valid:
+    batch_size: 512
+    shuffle: false
+    pin_memory: true
+    num_workers: 4
+    persistent_workers: true
+test:
+    batch_size: 512
+    shuffle: false
+    pin_memory: true
+    num_workers: 4
+    persistent_workers: true

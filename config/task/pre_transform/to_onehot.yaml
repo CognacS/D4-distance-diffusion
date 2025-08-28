@@ -1,0 +1,4 @@
+to_onehot:
+    map:
+        num_classes_node: num_cls_nodes
+        num_classes_edge: num_cls_edges

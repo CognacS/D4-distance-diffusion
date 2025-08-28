@@ -1,0 +1,9 @@
+train:
+    num_workers: 8
+    persistent_workers: true
+valid:
+    num_workers: 8
+    persistent_workers: true
+test:
+    num_workers: 8
+    persistent_workers: true

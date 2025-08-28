@@ -1,0 +1,6 @@
+defaults:
+  - dataloader: base_dataloader
+  - datatransform: no_transform
+  - model: dummy
+  - trainer: base_trainer
+  - callbacks: ckpt

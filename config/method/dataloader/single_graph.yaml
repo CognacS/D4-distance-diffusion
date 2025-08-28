@@ -1,0 +1,12 @@
+train:
+    batch_size: 1
+    pin_memory: true
+    num_workers: 0
+valid:
+    batch_size: 1
+    pin_memory: true
+    num_workers: 0
+test:
+    batch_size: 1
+    pin_memory: true
+    num_workers: 0

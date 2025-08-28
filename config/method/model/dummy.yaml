@@ -1,0 +1,4 @@
+DummyModel:
+    validation:
+        do_assignment: true
+        how_many_to_generate: 512

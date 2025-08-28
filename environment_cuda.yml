@@ -1,0 +1,27 @@
+name: ifh-gen
+channels:
+  - conda-forge
+dependencies:
+  - rdkit=2023.03.3
+  - python=3.11.7
+  - anaconda::pip
+  - graph-tool=2.46 # for graph functions in metrics during evaluation
+  # Deep Learning dependencies
+  - nvidia/label/cuda-11.8.0::cuda
+  - pytorch::pytorch=2.4.1=*cuda* # force cuda version
+  - pytorch::pytorch-cuda=11.8
+  - pyg::pyg=2.6.1
+  - lightning=2.4.0
+  - torchmetrics=1.4.2
+  # utility dependencies
+  - hydra-core=1.3.2 # for handling configuration files in yaml
+  - wandb=0.16.2 # for logging training and testing
+  # metrics dependencies
+  - pygsp=0.5.1 # for graph functions in metrics during evaluation
+  - pyemd=1.0.0 # for computing the emd kernel for mmd metrics
+  - fcd_torch=1.0.7 # for computing FCD of SMILES
+  - dglteam/label/cu118::dgl=1.1.2 # needed for computing GIN metrics for generic graphs
+  - pip:
+    - git+https://github.com/fabriziocosta/EDeN.git # for computing nspdk
+    - python_log_indenter # for better logging
+    - hydra-optuna-sweeper

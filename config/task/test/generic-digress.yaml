@@ -1,0 +1,5 @@
+graph:
+    profile: digress
+    type_of_graph: null
+    how_many_to_generate: ???
+    no_computational_metrics: false

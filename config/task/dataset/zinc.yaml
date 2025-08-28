@@ -1,0 +1,6 @@
+name: zinc250k
+params:
+    random_splits:
+        train: null
+        valid: 0.16 # 0.8 * 0.2
+        # test is predefined

@@ -1,0 +1,4 @@
+defaults:
+  - others/ema
+  - checkpoint/ema_checkpoint_fcd
+  - early_stopping/early_stopping_fcd

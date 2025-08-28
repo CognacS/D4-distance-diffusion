@@ -1,0 +1,4 @@
+defaults:
+ - InsertFillHaltModel@params: [base, use_digress, 1-4-node]
+
+name: InsertFillHaltModel

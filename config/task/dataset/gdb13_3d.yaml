@@ -1,0 +1,11 @@
+name: qm9
+params:
+    random_splits:
+        train: null
+        valid: 10000
+        test: 10000
+    include_pos: true
+    include_charges: true
+    subset_size: 169550
+    num_workers: 4
+    pre_filter_raw: FilterQuickInvalidPosMol

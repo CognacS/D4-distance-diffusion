@@ -1,0 +1,9 @@
+graph:
+    profile: cdgs
+    enabled_metrics:
+        - graph_conn_comp
+        - graph_cdgs
+        - sampling_time
+        - sampling_memory
+    how_many_to_generate: ???
+    no_computational_metrics: false

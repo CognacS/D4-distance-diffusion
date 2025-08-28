@@ -1,0 +1,35 @@
+defaults:
+ - task: community-small-cdgs
+ - method: dummy
+ - platform: local_1gpu
+ - logger: no_logger
+ - _self_
+
+
+config_name: "\
+    T${hydra.runtime.choices.task}_\
+    M${hydra.runtime.choices.method}_\
+    P${hydra.runtime.choices.platform}_\
+    L${hydra.runtime.choices.logger}"
+
+mode: train         # allowed values: (train, eval, train+eval, gen)
+
+# persistency
+enable_ckp: true    # enable saving checkpoints
+enable_log: true    # enable logging to wandb
+verbosity: info     # logging verbosity as in https://docs.python.org/3/library/logging.html
+                    # can be lower/upper case, or integer
+
+# speedups
+compile: true      # if true, compile the model with torch.jit.script
+
+# load checkpoints
+load_ckp: null      # load checkpoint if not null: if str, load from path;
+                    # if int, load version with config_name
+
+# reproducibility
+seed: 0             # RNG seed
+
+# advanced
+debug: false        # if true, only use 1 batch and 1 epoch
+profile: false      # if true, profile the training process

@@ -1,0 +1,6 @@
+max_epochs: 100000
+log_every_n_steps: 400
+val_check_interval: null
+check_val_every_n_epoch: 2000
+num_sanity_val_steps: 0
+enable_progress_bar: true

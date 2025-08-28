@@ -1,0 +1,3 @@
+EMAModelCheckpoint:
+    save_last: true
+    every_n_epochs: 1

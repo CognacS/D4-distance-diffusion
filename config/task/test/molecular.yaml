@@ -1,0 +1,4 @@
+molecular:
+    how_many_to_generate: 10000
+    relaxed: true
+    no_computational_metrics: false

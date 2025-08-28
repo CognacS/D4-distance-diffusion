@@ -1,0 +1,8 @@
+process:
+    name: graph_marginal
+schedule:
+    name: cosine
+    params:
+        max_time: 500
+timesampler:
+    name: uniform

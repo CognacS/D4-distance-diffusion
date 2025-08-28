@@ -1,0 +1,28 @@
+defaults:
+  - _self_
+  - diffusion: uniform_500
+  - ../architecture@denoising.architecture: graph_transformer/gt_large_unfrozen.yaml
+
+
+optimizer:
+    lr: 0.0002
+    weight_decay: 1.0e-12
+
+denoising:
+    loss:
+        lambda_train_E: 5.0
+        lambda_train_ext_E: 5.0
+        concat_edges: true
+        weighted: true
+        class_weighted: false
+
+generation:
+    conditional: false
+    batch_size: 256
+
+validation:
+    do_assignment: true
+    how_many_to_generate: 256
+
+features:
+    - indegree

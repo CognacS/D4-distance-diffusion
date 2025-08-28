@@ -1,0 +1,6 @@
+defaults:
+  - dataloader: base_dataloader
+  - datatransform: to_undirected
+  - model: digress
+  - trainer: base_trainer
+  - callbacks: ckpt

@@ -1,0 +1,12 @@
+Cython
+hydra-core
+pytorch_lightning
+rdkit
+scipy
+setuptools
+torchmetrics
+tqdm
+wandb
+pygsp
+pyemd
+fcd_torch

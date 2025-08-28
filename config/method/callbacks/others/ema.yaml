@@ -1,0 +1,6 @@
+EMA:
+    decay: 0.999
+    apply_ema_every_n_steps: 10
+    start_step: 3000
+    save_ema_weights_in_callback_state: true
+    evaluate_ema_weights_instead: true

@@ -1,0 +1,4 @@
+WandbLogger:
+    project: my-graph-generation-project
+    mode: online
+    watch: true
