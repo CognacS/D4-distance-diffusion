@@ -356,8 +356,9 @@ class GDB13Resources(DataResources):
         self.decoder = ds.mol_to_torch_converter
         self.info_total = ds.stats
 
-        # if there is any pre_transform, solve any transform adapter
+        # if there is any pre_transform, resolve any transform adapter
         self.preproc['pre_transform'] = self.transforms_to_pipeline(self.preproc['pre_transform'])
+        self.preproc['pre_filter'] = self.filters_to_pipeline(self.preproc['pre_filter'])
 
         try: # try to get the split datasets
 
@@ -368,12 +369,12 @@ class GDB13Resources(DataResources):
             }
 
         except DatasetException: # if not possible, create the splits
-            print('Creating random splits for QM9 graphs and SMILES')
+            print('Creating random splits for GDB13 graphs and SMILES')
 
             # reload dataset with preprocessing
             if self.preproc['pre_transform'] is not None:
-                ds.delete()
-                ds = GDB13(self.root, **self.preproc, **self.gdb13_cfg)
+                print('Applying preprocessing to the whole dataset')
+                ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
 
             dss = random_split_dataset([ds, ds_smiles], self.random_splits)
 

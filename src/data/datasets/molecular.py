@@ -126,16 +126,25 @@ class MolecularGraphsDataset(ProcessedDataset):
             # no parallelization, just convert
             results = [self._prepare_data_worker(data) for data in tqdm(self.raw_mol_dataset, desc='Converting Chem.Mols to SparseGraphs')]
         
+        self.pre_transform_filter_and_finalize(results, self.pre_transform, self.pre_filter)
 
-        # get all molecules
+
+        
+    def pre_transform_filter_and_finalize(
+            self,
+            input_graphs: List[SparseGraph],
+            pre_transform: Optional[Callable] = None,
+            pre_filter: Optional[Callable] = None
+        ) -> None:
+        # useful method to apply a pre_transform/pre_filter to an already processed dataset
         graphs = []
-        for graph in results:
+        for graph in input_graphs:
 
             # apply pre_transform if any
-            if self.pre_filter is not None and not self.pre_filter(graph):
+            if pre_filter is not None and not pre_filter(graph):
                 continue
-            if self.pre_transform is not None:
-                graph = self.pre_transform(graph)
+            if pre_transform is not None:
+                graph = pre_transform(graph)
 
             graphs.append(graph)
 
@@ -150,6 +159,16 @@ class MolecularGraphsDataset(ProcessedDataset):
         
         self.save(graphs, self.processed_paths[0])
         self.save_file(self.stats, self.processed_paths[1])
+        
+
+    def reapply_pre_transform(self, pre_transform: Optional[Callable] = None, pre_filter: Optional[Callable] = None):
+        # add pre_transform and pre_filter to the dataset
+        self.add_pre_transforms_filters(pre_transform, pre_filter)
+        # apply new pre_transform and pre_filter to the dataset
+        self.pre_transform_filter_and_finalize(self, pre_transform, pre_filter)
+        # reload data
+        self.load(self.processed_paths[0], SparseGraph)
+        self.stats = self.load_file(self.processed_paths[1])
 
 
     def data_to_mol_and_prop(self, sample):

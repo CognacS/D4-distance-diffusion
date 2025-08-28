@@ -11,6 +11,9 @@ from torch_geometric.io.fs import makedirs
 
 import src.data.utils.storing as stutils
 
+from torch_geometric.transforms import BaseTransform, Compose, ComposeFilters
+from src.data.transforms.core import TransformAdapter
+
 
 DEFAULT_DATASET_PATH = 'datasets'
 DEFAULT_SPLITS = {
@@ -129,6 +132,28 @@ class ProcessedDataset(InMemoryDataset, ABC):
             raise DatasetException('Trying to instantiate a split of a dataset that was not split yet.')
         
         super().__init__(self.root, transform, pre_transform, pre_filter)
+        
+        
+    def add_pre_transforms_filters(
+            self,
+            pre_transform=None,
+            pre_filter=None
+        ):
+        if isinstance(self.pre_transform, Compose):
+            if isinstance(pre_transform, Compose):
+                self.pre_transform.transforms.extend(pre_transform.transforms)
+            else:
+                self.pre_transform.transforms.append(pre_transform)
+        else:
+            self.pre_transform = pre_transform
+
+        if isinstance(self.pre_filter, ComposeFilters):
+            if isinstance(pre_filter, ComposeFilters):
+                self.pre_filter.filters.extend(pre_filter.filters)
+            else:
+                self.pre_filter.filters.append(pre_filter)
+        else:
+            self.pre_filter = pre_filter
 
 
     @property
@@ -230,6 +255,9 @@ class DataResources(ABC):
 
     def transforms_to_pipeline(self, transforms):
         return transforms_to_pipeline(transforms=transforms, data_resources=self)
+    
+    def filters_to_pipeline(self, filters):
+        return filters_to_pipeline(filters=filters, data_resources=self)
 
     @abstractmethod
     def prepare_data(self):
@@ -238,10 +266,7 @@ class DataResources(ABC):
     @abstractmethod
     def get(self, resource: str=None, split: str=None, transform=None, **kwargs):
         raise NotImplementedError
-    
 
-from torch_geometric.transforms import BaseTransform, Compose
-from src.data.transforms.core import TransformAdapter
 
 
 def transforms_to_pipeline(transforms, **kwargs):
@@ -262,3 +287,21 @@ def transforms_to_pipeline(transforms, **kwargs):
             raise ValueError(f'Invalid transform: {t}')
         
     return Compose(pipeline)
+
+
+def filters_to_pipeline(filters, **kwargs):
+    if filters is None:
+        return None
+
+    if not isinstance(filters, list):
+        filters = [filters]
+
+    pipeline = []
+
+    for f in filters:
+        if isinstance(f, Callable):
+            pipeline.append(f)
+        else:
+            raise ValueError(f'Invalid filter: {f}')
+        
+    return ComposeFilters(pipeline)

@@ -347,8 +347,9 @@ class QM9Resources(DataResources):
         self.decoder = ds.mol_to_torch_converter
         self.info_total = ds.stats
 
-        # if there is any pre_transform, solve any transform adapter
+        # if there is any pre_transform, resolve any transform adapter
         self.preproc['pre_transform'] = self.transforms_to_pipeline(self.preproc['pre_transform'])
+        self.preproc['pre_filter'] = self.filters_to_pipeline(self.preproc['pre_filter'])
 
         try: # try to get the split datasets
 
@@ -362,9 +363,9 @@ class QM9Resources(DataResources):
             print('Creating random splits for QM9 graphs and SMILES')
 
             # reload dataset with preprocessing
-            if self.preproc['pre_transform'] is not None:
-                ds.delete()
-                ds = QM9(self.root, **self.preproc, **self.qm9_cfg)
+            if self.preproc['pre_transform'] is not None or self.preproc['pre_filter'] is not None:
+                print('Applying preprocessing to the whole dataset')
+                ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
 
             dss = random_split_dataset([ds, ds_smiles], self.random_splits)
 

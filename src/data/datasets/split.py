@@ -28,7 +28,7 @@ def split_dataset(dataset: Dataset|List[Dataset], splits_and_indices: Dict[str, 
     return split_datasets
 
 
-def random_split_dataset(dataset: Dataset|List[Dataset], splits_and_fracts_or_nums: Dict[str, float]|Dict[str, int], seed: int = None) -> Dict[str, Dataset]:
+def random_split_dataset(dataset: Dataset|List[Dataset], splits_and_fracts_or_nums: Dict[str, float]|Dict[str, int], seed: int = 0) -> Dict[str, Dataset]:
     """Split a dataset or a list of datasets into multiple datasets according to the splits list. For example, if splits is [0.7, 0.3],
     the function will return a list of two datasets, the first one containing 70% of the elements of the input dataset,
     and the second one containing the remaining 30%. If splits is [3, 1], the function will return a list of two
