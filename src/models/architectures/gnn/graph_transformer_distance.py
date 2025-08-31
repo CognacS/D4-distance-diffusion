@@ -7,8 +7,7 @@ from torch import Tensor
 from src.datatypes.dense import DenseGraph, DenseEdges, get_bipartite_edge_mask_dense, get_edge_mask_dense
 from src.datatypes.features.posenc import SinusoidalPosEmb
 
-from src.models.architectures.gnn.graph_transformer_unfrozen import (
-    UnfrozenXEyTransformerLayer,
+from src.models.architectures.gnn.graph_transformer import (
     DIM_X, DIM_E, DIM_Y,
     Etoy, Xtoy
 )
@@ -508,7 +507,7 @@ class GraphTransformerDistance(nn.Module):
         #######################  MAIN BODY: TRANSFORMER  #######################
 
         self.tf_layers = nn.ModuleList([
-            UnfrozenXEyTransformerLayer(
+            XEyTransformerLayer(
                 dx=transf_inout_dims[DIM_X],
                 de=transf_inout_dims[DIM_E],
                 dy=transf_inout_dims[DIM_Y],

@@ -120,34 +120,6 @@ class SparseGraph(Graph):
             return self.global_num_nodes
         return self.x.shape[0]
 
-    
-    def collapse(self) -> SparseGraph:
-        """returns a SparseGraph where each entry is a class instead of a feature
-        vector
-
-        Returns
-        -------
-        collapsed_graph : SparseGraph
-            this graph but with classes instead of feature vectors
-        """
-
-        if not self.collapsed:
-            # collapse to classes
-            self.x =            torch.argmax(self.x, dim=-1)
-            self.edge_attr =    torch.argmax(self.edge_attr, dim=-1)
-
-        return self
-    
-
-    def to_onehot(self, num_classes_x: int, num_classes_e: int) -> SparseGraph:
-
-        if self.collapsed:
-
-            self.x =         one_hot(self.x,         num_classes = num_classes_x, dtype=torch.float)
-            self.edge_attr = one_hot(self.edge_attr, num_classes = num_classes_e, dtype=torch.float)
-    
-        return self
-
 
 def from_data(data: Data) -> SparseGraph:
     """Convert a torch_geometric.data.Data object to a SparseGraph object."""
@@ -207,32 +179,6 @@ class SparseEdges(SparseGraph):
             # swap sizes
             self.num_nodes_s, self.num_nodes_t = self.num_nodes_t, self.num_nodes_s
         return self
-
-    
-    def collapse(self) -> SparseGraph:
-        """returns a SparseGraph where each entry is a class instead of a feature
-        vector
-
-        Returns
-        -------
-        collapsed_graph : SparseGraph
-            this graph but with classes instead of feature vectors
-        """
-
-        if not self.collapsed:
-            self.edge_attr =    torch.argmax(self.edge_attr, dim=-1)
-
-        return self
-    
-
-    def to_onehot(self, num_classes_e: int) -> SparseGraph:
-
-        if self.collapsed:
-            self.edge_attr = one_hot(self.edge_attr, num_classes = num_classes_e, dtype=torch.float)
-    
-        return self
-    
-
 
 
 def to_directed(edge_index: Tensor, edge_attr: Tensor, lower_to_higher: bool = True):

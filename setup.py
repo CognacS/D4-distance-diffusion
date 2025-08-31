@@ -1,5 +1,4 @@
 from setuptools import setup, find_packages, Extension
-from Cython.Distutils import build_ext
 import numpy
 
 # # Define the C++ extension module
@@ -15,7 +14,6 @@ setup(
     name='graph-generation',
     version="1.1.0",
     packages=find_packages(),
-    cmdclass={'build_ext': build_ext},
     zip_safe=False,
     include_dirs=[numpy.get_include()]
 )

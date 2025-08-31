@@ -310,6 +310,7 @@ class GDB13Resources(DataResources):
             num_workers: int = 1,
             pre_transform=None,
             pre_filter=None,
+            pre_transform_raw=None,
             pre_filter_raw=None
         ):
 
@@ -326,6 +327,7 @@ class GDB13Resources(DataResources):
             'include_pos': include_pos,
             'include_charges': include_charges,
             'num_workers': num_workers,  # default to 1 worker, can be changed later
+            'pre_transform_raw': pre_transform_raw,
             'pre_filter_raw': pre_filter_raw
         }
         self.smiles_cfg = {

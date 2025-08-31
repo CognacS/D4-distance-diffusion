@@ -15,5 +15,4 @@ def get_features_list(f_names: List[str]):
 
 from src.datatypes.features.geometric import *
 from src.datatypes.features.spectral import *
-from src.datatypes.features.attributes import *
 from src.datatypes.features.spatial import *

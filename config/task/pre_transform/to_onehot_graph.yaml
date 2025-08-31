@@ -1,0 +1,4 @@
+to_onehot_graph:
+    map:
+        x: num_cls_nodes
+        edge_attr: num_cls_edges

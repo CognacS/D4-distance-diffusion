@@ -41,6 +41,7 @@ from src.datatypes.sparse import SparseGraph, SparseEdges
 ################  NOISE IMPORTS  #################
 
 from copy import copy
+from src.noise.core import dict_of_noise_processes_from_config
 from src.noise.config_support import build_noise_process
 from src.noise.batch_transform.sequence_sampler import sample_sequences
 
@@ -69,6 +70,7 @@ from src.noise.graph_diffusion import (
     GraphDiffusionProcess
 )
 
+from src.noise.discrete_diffusion import DiscreteDiffusionProcess
 from src.noise.graph_diffusion import GraphDiffusionProcess
 from src.noise.graph_cont_diffusion import DistanceGaussianDiffusionProcess
 
@@ -98,6 +100,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             denoising: Dict,
             diffusion: Dict,
             dist_diffusion: Dict,
+            charge_diffusion: Dict,
 
             # optimizer configuration
             optimizer: Dict,
@@ -139,6 +142,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         self.denoising_config = denoising
         self.diffusion_config = diffusion
         self.dist_diffusion_config = dist_diffusion
+        self.charge_diffusion_config = charge_diffusion
 
         self.time_enc_dim = 16
         self.embed_time = embed_time
@@ -157,16 +161,17 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         # setup model input and output dimensions (based on the dataset)
         self.data_dims = {
             'x': dataset_info['num_cls_nodes'],
-            'e': dataset_info['num_cls_edges'],
+            'edge_adjmat': dataset_info['num_cls_edges'],
+            'node_charges': dataset_info['num_cls_charges'],
             'y': 0 if discard_conditioning else dataset_info['dim_targets'],
             "dist": 1
         }
 
-        self.data_dims['e'] += 1  # account for no-edge class
+        self.data_dims['edge_adjmat'] += 1  # account for no-edge class
 
         if received_dims:
             self.received_dims = deepcopy(received_dims)
-            self.received_dims['e'] += 1
+            self.received_dims['edge_adjmat'] += 1
         else:
             self.received_dims = self.data_dims
 
@@ -196,13 +201,6 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             input_dims =    self.augmented_dims,
             output_dims =   self.data_dims,
         )
-        
-        enc_x_dim = self.denoising_model.get_external_nodes_dim()
-
-        self.ext_x_enc = nn.Linear(
-            enc_x_dim + get_dims_list(self.additional_features)['x'],
-            enc_x_dim
-        )
 
         ######################  BUILD DIFFUSION PROCESS  #######################
 
@@ -211,25 +209,52 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             self.diffusion_config.timesampler
         )
 
-        self.diffusion_process: GraphDiffusionProcess
-        self.diffusion_process = reg_diffusion.get_instance_from_cfg(
-            self.diffusion_config.process,
-            schedule = reg_schedule.get_instance_from_cfg(
-                self.diffusion_config.schedule
-            ),
-            num_cls_x = self.data_dims['x'],
-            num_cls_e = self.data_dims['e']
-        )
+        # self.diffusion_process: GraphDiffusionProcess
+        # self.diffusion_process = reg_diffusion.get_instance_from_cfg(
+        #     self.diffusion_config.process,
+        #     schedule = reg_schedule.get_instance_from_cfg(
+        #         self.diffusion_config.schedule
+        #     ),
+        #     num_cls_x = self.data_dims['x'],
+        #     num_cls_e = self.data_dims['e']
+        # )
 
         
-        self.diffusion_process_dists: DistanceGaussianDiffusionProcess
-        self.diffusion_process_dists = reg_diffusion.get_instance_from_cfg(
-            self.dist_diffusion_config.process,
-            schedule = reg_schedule.get_instance_from_cfg(
-                self.dist_diffusion_config.schedule
-            ),
-            undirected=True
+        # self.diffusion_process_dists: DistanceGaussianDiffusionProcess
+        # self.diffusion_process_dists = reg_diffusion.get_instance_from_cfg(
+        #     self.dist_diffusion_config.process,
+        #     schedule = reg_schedule.get_instance_from_cfg(
+        #         self.dist_diffusion_config.schedule
+        #     ),
+        #     undirected=True
+        # )
+        
+        # self.diffusion_process_charges: DiscreteDiffusionProcess
+        # self.diffusion_process_charges = reg_diffusion.get_instance_from_cfg(
+        #     self.charge_diffusion_config.process,
+        #     schedule = reg_schedule.get_instance_from_cfg(
+        #         self.charge_diffusion_config.schedule
+        #     )
+        # )
+        # prepare additional parameters for each process (number of classes)
+        process_kwargs = {
+            'x': {'num_cls': self.data_dims['x']},
+            'edge_adjmat': {'num_cls': self.data_dims['edge_adjmat']},
+            'node_charges': {'num_cls': self.data_dims['node_charges']}
+        }
+        # build all noise processes
+        diffusion_procs_per_data = dict_of_noise_processes_from_config(
+            config = self.diffusion_config.params,
+            process_kwargs=process_kwargs
         )
+        # check that all required processes are present
+        assert all(s in diffusion_procs_per_data for s in ['x', 'edge_adjmat', 'edge_dist', 'node_charges']), \
+            "Diffusion processes for x, edge_adjmat, edge_dist, node_charges must be specified in D4Model"
+        # build the graph diffusion process
+        # this computes all processes at the same time in a single call
+        self.diffusion_process = GraphDiffusionProcess(
+            diffusion_procs_per_data=diffusion_procs_per_data,
+        )   
 
 
         ######################  BUILD LOSSES AND METRICS  ######################
@@ -239,9 +264,11 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         metrics = nn.ModuleDict({
             labels.DENOISE_CE_X: MeanMetric(),
+            labels.DENOISE_CE_C: MeanMetric(),
             labels.DENOISE_CE_E: MeanMetric(),
             labels.DENOISE_ACC_X: MulticlassAccuracy(num_classes=self.data_dims['x'], validate_args=False),
             labels.DENOISE_ACC_E: MulticlassAccuracy(num_classes=self.data_dims['e'], validate_args=False),
+            labels.DENOISE_ACC_C: MulticlassAccuracy(num_classes=self.data_dims['node_charges'], validate_args=False),
             labels.DENOISE_MSE_DIST: MeanMetric(),
             labels.DENOISE_MAE_DIST: MeanAbsoluteError(),
             labels.DENOISE_TOTAL: MeanMetric()
@@ -259,9 +286,6 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
     def is_conditional(self):
         return self.generation_config['conditional']
-    
-    def get_external_nodes_dim(self):
-        return self.denoising_model.get_external_nodes_dim()
 
 
     ############################################################################
@@ -276,16 +300,13 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         ) -> Tuple[List[Tensor], List[Tensor]]:
         """Generate the true and predicted nodes and egdes for the denoising
         process. The flow is as follows:
-        1 - encode the batch_external to get encoded nodes
-        2 - densify batch_to_generate as a DenseGraph, the encoded nodes,
-            and the external edges, with onehot and masking
+        2 - densify batch_to_generate as a DenseGraph
         3 - sample the diffusion process at uniformly random timesteps to
             make a noisy version of batch_to_generate (again requires onehot
             and masking)
         4 - try to denoise the above data which include the batch_to_generate
-            and edges_external
         5 - flatten and pack the true and predicted nodes and edges
-        The final order is: nodes, edges, external_edges.
+        The final order is: nodes, edges
         Predicted values are in expanded form, true values are collapsed. This is
         ideal for the cross-entropy loss function.
 
@@ -294,14 +315,6 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         batch_to_generate : SparseGraph
             sparse graph with collapsed classes (i.e. class indices). This graph
             will be noised and denoised.
-        batch_external : Optional[SparseGraph]
-            sparse graph with onehot classes. The nodes of this graph will be
-            encoded and used to denoise the batch_to_generate. Default is None,
-            in which case only the batch_to_generate is noised and denoised.
-        edges_external : Optional[Tuple[Tensor, Tensor]]
-            external edges in edge_index and edge_attr form, to be noised and
-            denoised. Default is None, in which case only the batch_to_generate
-            is noised and denoised.
 
         Returns
         -------
@@ -314,7 +327,6 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         ####################  FORMAT INPUT FOR PREDICTION  #####################
         # 1 - densify
         # transform the current nodes to dense format
-        # transform the external nodes and edges to dense format if needed
         batch_to_generate_dense: DenseGraph
         batch_to_generate_dense = format_generation_task_data(
             curr_graph =		batch_to_generate
@@ -327,12 +339,19 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         # 2 - copy true masked data (to be returned later)
         true_x = batch_to_generate_dense.x.argmax(dim=-1)[node_mask]
         true_e = batch_to_generate_dense.edge_adjmat.argmax(dim=-1)[triang_edge_mask]
+        true_c = batch_to_generate_dense.node_charges.argmax(dim=-1)[node_mask]
         true_dist = batch_to_generate_dense.edge_dist[triang_edge_mask]
             
         ##################  UPDATE MARGINAL PROCESS IF NEEDED  #################
-        if hasattr(self.diffusion_process, 'update'):
+        
+        true_data = {'x': true_x, 'edge_adjmat': true_e, 'node_charges': true_c}
+        for data in ['x', 'edge_adjmat', 'node_charges']:
+            
+            process = self.diffusion_process.diffusion_procs_per_data[data]
+            true_d = true_data[data]
 
-            self.diffusion_process.update(x_labels=true_x, e_labels=true_e)
+            if hasattr(process, 'update'):
+                process.update(labels=true_d)
 
         #######################  APPLY GRAPH DIFFUSION  ########################
         # sample the timesteps for the diffusion process
@@ -347,44 +366,30 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         # sample the noisy graph at timestep u
 
         # WARNING: here selfloops are not masked!!!
-        # apply discrete noise, then continuous noise to dists
-        noisy_graph = self.diffusion_process.sample_from_original(batch_to_generate_dense, t=u)
-        noisy_graph = self.diffusion_process_dists.sample_from_original(noisy_graph, t=u)
-        
-        
-        noisy_data = noisy_graph
+        noisy_graph: DenseGraph = self.diffusion_process.sample_from_original(batch_to_generate_dense, t=u)
 
         # onehot and mask the noisy data again (to remove the fake noisy components)
-        onehot_data = to_onehot_all(
-            *noisy_data,
-            **self.data_dims
-        )
+        onehot_data = to_onehot_data(noisy_graph, **self.data_dims)
 
         self.add_additional_features(onehot_data)
 
-        masked_data = mask_all(
-            *onehot_data
-        )
-
-        noisy_batch_to_generate_dense_onehot, noisy_ext_edges_onehot = masked_data
+        noisy_batch_to_generate_dense_onehot = mask_data(onehot_data)
 
         #####################  PREDICT THE ORIGINAL GRAPH  #####################
         gen_batch_dense: DenseGraph
-        gen_ext_edges: DenseEdges   # None if no external graph
-        gen_batch_dense, gen_ext_edges = self.denoising_model(
-            graph =                noisy_batch_to_generate_dense_onehot
+        gen_batch_dense = self.denoising_model(
+            graph = noisy_batch_to_generate_dense_onehot
         )
 
         pred_x = gen_batch_dense.x[node_mask]
         pred_e = gen_batch_dense.edge_adjmat[triang_edge_mask]
+        pred_c = gen_batch_dense.node_charges[node_mask]
         pred_dist = gen_batch_dense.edge_dist[triang_edge_mask]
-            
-        ###########################  DISTANCE PREDICTION  ############################
         
         ###########################  FINAL PACKING  ############################
 
-        true_values = [true_x, true_e, true_dist]
-        pred_values = [pred_x, pred_e, pred_dist, node_mask, triang_edge_mask,]
+        true_values = [true_x, true_e, true_dist, true_c]
+        pred_values = [pred_x, pred_e, pred_dist, pred_c, node_mask, triang_edge_mask]
         
         return true_values, pred_values
     
@@ -402,6 +407,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         metrics[labels.DENOISE_CE_X](loss_logs[labels.DENOISE_CE_X])
         metrics[labels.DENOISE_CE_E](loss_logs[labels.DENOISE_CE_E])
+        metrics[labels.DENOISE_CE_C](loss_logs[labels.DENOISE_CE_C])
         metrics[labels.DENOISE_MSE_DIST](loss_logs[labels.DENOISE_MSE_DIST])
         metrics[labels.DENOISE_TOTAL](loss_logs[labels.DENOISE_TOTAL])
         if pred_values[0].numel() > 0:
@@ -410,6 +416,8 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             metrics[labels.DENOISE_ACC_E](pred_values[1], true_values[1])
         if pred_values[2].numel() > 0:
             metrics[labels.DENOISE_MAE_DIST](pred_values[2], true_values[2])
+        if pred_values[3].numel() > 0:
+            metrics[labels.DENOISE_ACC_C](pred_values[3], true_values[3])
 
         return metrics
 
@@ -432,11 +440,13 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
     def on_train_epoch_end(self) -> None:
         """"Recall that this method is called AFTER the validation epoch, if there is any!"""
-
-        if isinstance(self.diffusion_process, MarginalGraphDiffusionProcess):
+            
+        for data in ['x', 'edge_adjmat', 'node_charges']:
             # stop updating marginals at the end of the first training epoch
-            self.diffusion_process.stop_updating()
-            self.diffusion_process_edges.stop_updating()
+            process = self.diffusion_process.diffusion_procs_per_data[data]
+
+            if hasattr(process, 'update'):
+                process.stop_updating()
         
         denoise_logs = self.apply_prefix(
             metrics = self.metrics[KEY_TRAIN],
@@ -455,7 +465,6 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         true_data, pred_data = self.compute_true_pred_denoising(
             batch_to_generate = batch,
-            train_step=True
         )
         
 
@@ -484,10 +493,9 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         # currently using the AdamW optimizer
         # NOTE: the original code used the option "amsgrad=True"
-        params = list(self.denoising_model.parameters()) + list(self.ext_x_enc.parameters())
 
         return torch.optim.AdamW(
-            params, **self.optimizer_config
+            self.denoising_model.parameters(), **self.optimizer_config
         )
     
     ############################################################################
@@ -648,20 +656,16 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         self.add_additional_features(augmented_graph_to_gen)
 
         augmented_graph_to_gen.apply_mask()
-        
 
         # predict final graph and edges
         final_graph: DenseGraph
-        final_graph, final_ext_edges = self.denoising_model(
-            graph =				    augmented_graph_to_gen
+        final_graph = self.denoising_model(
+            graph = augmented_graph_to_gen
         )
-
-        has_ext_edges = final_ext_edges is not None
         
         # transform the logits to probabilities
         final_graph.x = torch.softmax(final_graph.x, dim=-1)
         final_graph.edge_adjmat = torch.softmax(final_graph.edge_adjmat, dim=-1)
-        
 
         # sample graph at step t-1 from posterior
         generated_graph = self.diffusion_process.sample_posterior(
@@ -676,15 +680,10 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         )
 
         if return_onehot:
-            generated_graph = to_onehot_all(
-                generated_graph,
-                **self.data_dims
-            )
+            generated_graph = to_onehot_data(generated_graph, **self.data_dims)
 
         if return_masked:
-            generated_graph = mask_all(
-                generated_graph
-            )
+            generated_graph = mask_data(generated_graph)
 
 
         if copy_globals_to_output:
@@ -697,7 +696,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
     def sample_batch(
         self,
         batch_size: int,
-        conditioning_y: Optional[Tensor]=None,
+        conditioning_elems: Optional[Tensor]=None,
         return_directed: bool=True,
         save_chains: int=0
     ):
@@ -726,14 +725,14 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         del new_dists
 
         # convert the new subgraph to one-hot
-        new_graph = to_onehot_all(
+        new_graph = to_onehot_data(
             new_graph,
             **self.data_dims
         )
 
         # copy the global information
-        if conditioning_y is not None:
-            new_graph.y = conditioning_y.clone()
+        if conditioning_elems is not None:
+            new_graph.y = conditioning_elems.clone()
         else:
             new_graph.y = None
         
@@ -761,7 +760,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             t_tensor.fill_(t)
 
             # sample graph at step u-1
-            new_graph_dense, new_ext_edges = self.forward_denoising(
+            new_graph_dense = self.forward_denoising(
                 graph_to_gen =		new_graph_dense,
                 denoising_time = 	t_tensor,
                 return_onehot =		True
@@ -787,14 +786,12 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             
         new_graph_dense.node_pos = updated_node_pos
         del new_graph_dense.edge_dist
-        if new_ext_edges is not None:
-            del new_ext_edges.edge_dist
 
         ########################################################################
         #                    MERGE THE OLD AND NEW SUBGRAPHS                   #
         ########################################################################
 
-        output_graph, output_edges = sparsify_data(
+        output_graph = sparsify_data(
             subgraph = new_graph_dense,
             subgraph_nodes_num = number_of_nodes,
         )
@@ -804,8 +801,8 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         ########################################################################
 
         # replace globals with starting variables, removing time
-        if conditioning_y is not None:
-            output_graph.y = conditioning_y
+        if conditioning_elems is not None:
+            output_graph.y = conditioning_elems
         else:
             output_graph.y = None
 
@@ -816,7 +813,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
     def sample(
             self,
             num_samples: int,
-            condition: Optional[Dict]=None,
+            conditioning_elems: Optional[Dict]=None,
             batch_size: Optional[int]=None
         ):
 
@@ -833,10 +830,10 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
             graph_batch = self.sample_batch(
                 batch_size=to_generate,
-                conditioning_y=condition[batch_idx] if condition is not None else None
+                conditioning_elems=conditioning_elems[batch_idx] if conditioning_elems is not None else None
             )
 
-            graph_batch.collapse()
+            graph_batch.collapse('x', 'edge_attr', 'node_charges')
 
             output_batch = graph_batch.to_data_list()
 
@@ -952,64 +949,56 @@ def sparsify_data(
 
 ###########################  BULK OPERATION METHODS  ###########################
 
-def to_onehot_all(*data, **classes_nums):
+def to_onehot_data(d, **classes_nums):
 
-    ret_data = []
+    if isinstance(d, tuple):
+        k, d = d
+        ret_d = F.one_hot(
+            d.long(), num_classes = classes_nums[k]
+        ).float()
 
-    for i, d in enumerate(data):
-        if isinstance(d, tuple):
-            k, d = d
-            ret_d = F.one_hot(
-                d.long(), num_classes = classes_nums[k]
-            ).float()
+    elif isinstance(d, SparseGraph):
+        ret_d = d.to_onehot(
+            x =	classes_nums['x'],
+            edge_attr = classes_nums['e'],
+            node_charges = classes_nums['c']
+        )
+    elif isinstance(d, DenseGraph):
+        ret_d = d.to_onehot(
+            x =	classes_nums['x'],
+            edge_adjmat = classes_nums['e'],
+            node_charges = classes_nums['c']
+        )
 
-        elif isinstance(d, DenseEdges):
-            ret_d = d.to_onehot(
-                num_classes_e =	classes_nums['e']
-            )
-        
-        elif isinstance(d, (DenseGraph, SparseGraph)):
-            ret_d = d.to_onehot(
-                num_classes_x =	classes_nums['x'],
-                num_classes_e =	classes_nums['e'],
-            )
+    elif isinstance(d, Tensor):
+        if d.dtype == torch.bool:
+            ret_d = d.unsqueeze(-1)
 
-        elif isinstance(d, Tensor):
-            if d.dtype == torch.bool:
-                ret_d = d.unsqueeze(-1)
+    elif d is None:
+        ret_d = None
 
-        elif d is None:
-            ret_d = None
+    else:
+        raise NotImplementedError(f'Data of type {type(d)} during to_onehot_data')
 
-        else:
-            raise NotImplementedError(f'{i}-th data of type {type(d)} during to_onehot_all')
-        
-        ret_data.append(ret_d)
-
-    return ret_data
+    return ret_d
 
 
-def mask_all(*data, **masks):
+def mask_data(d, **masks):
 
-    ret_data = []
+    if isinstance(d, tuple):
+        k, d = d
+        ret_d = d * masks[k].unsqueeze(-1)
+    
+    elif isinstance(d, DenseGraph):
+        ret_d = d.apply_mask()
 
-    for i, d in enumerate(data):
-        if isinstance(d, tuple):
-            k, d = d
-            ret_d = d * masks[k].unsqueeze(-1)
-        
-        elif isinstance(d, DenseGraph):
-            ret_d = d.apply_mask()
+    elif d is None:
+        ret_d = None
 
-        elif d is None:
-            ret_d = None
+    else:
+        raise NotImplementedError(f'Data of type {type(d)} during mask_data')
 
-        else:
-            raise NotImplementedError(f'{i}-th data of type {type(d)} during mask_all')
-
-        ret_data.append(ret_d)
-
-    return ret_data
+    return ret_d
 
 
 #################################  ASSERTIONS  #################################

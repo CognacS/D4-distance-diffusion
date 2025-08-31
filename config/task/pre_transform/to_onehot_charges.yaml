@@ -1,0 +1,4 @@
+to_onehot:
+    attr_name: node_charges
+    map:
+        num_classes: num_cls_charges

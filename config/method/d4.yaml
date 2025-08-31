@@ -1,0 +1,6 @@
+defaults:
+  - dataloader: base_dataloader
+  - datatransform: to_undirected
+  - model: d4
+  - trainer: molecular_trainer
+  - callbacks: ckpt

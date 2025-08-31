@@ -349,7 +349,7 @@ class GraphToMoleculeConverter:
                 g.edge_index, g.edge_attr = to_directed(g.edge_index, g.edge_attr)
 
             # collapse classes if needed
-            g.collapse()
+            g.collapse('x', 'edge_attr', 'node_charges')
 
             mol = build_molecule(
                 atom_types =		g.x,

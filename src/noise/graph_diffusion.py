@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from torch import Tensor, IntTensor, BoolTensor
 
-
 from src.datatypes.dense import (
     DenseGraph,
     DenseEdges,
@@ -50,7 +49,7 @@ class GraphDiffusionProcess(StructuredMultimodalDiffusionProcess):
             return {}
         else:
             raise DiffusionProcessException(f'Could not map datapoint to dict: {datapoint}')
-    
+
 
     def compose_back(self, datapoint: Dict[str, Tensor], other_datapoint: DenseGraph) -> DenseGraph:
 
@@ -71,23 +70,6 @@ class GraphDiffusionProcess(StructuredMultimodalDiffusionProcess):
                 attrs[key] = other_datapoint[key]
                 
         graph = other_datapoint.__class__(**attrs).apply_mask()
-
-        # if 'x' in datapoint:
-            
-        #     graph = DenseGraph(
-        #         x=datapoint['x'],
-        #         edge_adjmat=edge_adjmat,
-        #         y=other_datapoint.y,
-        #         node_mask=other_datapoint.node_mask,
-        #         edge_mask=other_datapoint.edge_mask
-        #     ).apply_mask()
-
-        # elif 'e' in datapoint:
-            
-        #     graph = DenseEdges(
-        #         edge_adjmat=edge_adjmat,
-        #         edge_mask=other_datapoint.edge_mask
-        #     ).apply_mask()
 
         return graph
     

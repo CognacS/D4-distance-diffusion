@@ -97,102 +97,10 @@ class SpectralFeature(Feature):
 
     def __call__(self, graph: Data) -> Data:
 
-        if isinstance(graph, (tuple, list)) and graph[-1] is None:
-            graph = graph[0]
-
-        if isinstance(graph, (DenseGraph, SparseGraph)):
-            # get adjmat and node_mask from either dense or sparse graph
-            adjmat, node_mask = get_adjmat_and_node_mask(g=graph)
-            node_masks = node_mask
-            batches = None
-            
-        elif isinstance(graph, (tuple, list)):
-
-            # in this case we have to merge two graphs and the intermediate
-            # edges between them
-
-            if len(graph) == 3:
-                graph_b, edges_ba, graph_a = graph
-                edges_ab = edges_ba.transpose()
-            elif len(graph) == 4:
-                graph_b, edges_ba, edges_ab, graph_a = graph
-
-            assert isinstance(graph_a, SparseGraph), "graph_a must be a SparseGraph"
-
-
-            if isinstance(graph_b, DenseGraph):
-                # get cumulative nodes
-                cum_nodes_t = get_ptr_from_node_mask(graph_b.node_mask)
-                batch_b = get_batch_from_node_mask(graph_b.node_mask)
-                adjmat_b = graph_b.edge_adjmat
-                adjmat_ab = edges_ab.edge_adjmat
-                adjmat_ba = edges_ba.edge_adjmat
-                if adjmat_b.ndim == 4:
-                    adjmat_b = adjmat_b[..., 1:]
-                    adjmat_ab = adjmat_ab[..., 1:]
-                    adjmat_ba = adjmat_ba[..., 1:]
-                # get edge_index
-                edge_index_bb, _ = dense_to_sparse(
-                        adj=adjmat_b,
-                        cum_num_nodes_s=cum_nodes_t,
-                        cum_num_nodes_t=cum_nodes_t
-                    )
-                
-                cum_nodes_s = graph_a.ptr
-
-                edge_index_ab, _ = dense_to_sparse(
-                    adj=adjmat_ab,
-                    cum_num_nodes_s=cum_nodes_s,
-                    cum_num_nodes_t=cum_nodes_t
-                )
-                edge_index_ba, _ = dense_to_sparse(
-                    adj=adjmat_ba,
-                    cum_num_nodes_s=cum_nodes_t,
-                    cum_num_nodes_t=cum_nodes_s
-                )
-            elif isinstance(graph_b, SparseGraph):
-                batch_b = graph_b.batch
-                edge_index_bb = graph_b.edge_index
-                edge_index_ab = edges_ab.edge_index
-                edge_index_ba = edges_ba.edge_index
-            else:
-                raise ValueError(f"graph_b must be either DenseGraph or SparseGraph, got {type(graph_b)}")
-
-            # graph a is assumed to be sparse
-            batch_a = graph_a.batch
-            edge_index_aa = graph_a.edge_index
-
-            # merge edge indices
-            edge_index = merge_edge_indices(
-                edge_index_bb=edge_index_bb,
-                edge_index_ab=edge_index_ab,
-                edge_index_ba=edge_index_ba,
-                edge_index_aa=edge_index_aa,
-                num_nodes_a=graph_a.num_nodes,
-            )
-            # merge batches
-            batch = torch.cat([batch_a, batch_b], dim=0)
-            # reorder edge_index and batch
-            perm = torch.argsort(batch)
-            batch = batch[perm]
-            edge_index = relabel_edge_index(perm, edge_index)
-
-            num_nodes_per_sample = graph_a.num_nodes_per_sample + graph_b.num_nodes_per_sample
-
-            # get adjmat and node_mask of the merged graph
-            adjmat, node_mask = edge_index_batch_to_adjmat_mask(
-                edge_index=edge_index,
-                batch=batch,
-                num_nodes_per_sample= num_nodes_per_sample,
-                batch_size=graph_a.num_graphs
-            )
-
-            node_mask_a = get_node_mask_from_num_nodes(graph_a.num_nodes_per_sample, max_num_nodes=adjmat.shape[1])
-            node_mask_b = get_node_mask_from_num_nodes(num_nodes_per_sample, max_num_nodes=adjmat.shape[1])
-            node_mask_b = node_mask_b * (~node_mask_a) # filter out nodes from graph_a
-
-            node_masks = [node_mask_b, node_mask_a]
-            batches = [batch_b, batch_a]
+        # get adjmat and node_mask from either dense or sparse graph
+        adjmat, node_mask = get_adjmat_and_node_mask(g=graph)
+        node_masks = node_mask
+        batches = None
 
         if self.cycles:
             # calculate cyclefeatures

@@ -159,58 +159,7 @@ class DenseGraph(Graph):
             self.masked = True
 
         return self
-    
 
-    def _collapse_nodes(self) -> DenseGraph:
-        if self.x is not None:
-            self.x = torch.argmax(self.x, dim=-1)
-        return self
-
-    def _collapse_edges(self) -> DenseGraph:
-        if self.edge_adjmat is not None:
-            self.edge_adjmat = torch.argmax(self.edge_adjmat, dim=-1)
-        return self
-
-
-    def collapse(self) -> DenseGraph:
-        """returns a DenseGraph where each entry is a class instead of a feature
-        vector
-
-        Returns
-        -------
-        collapsed_graph : DenseGraph
-            this graph but with classes instead of feature vectors
-        """
-
-        if not self.collapsed:
-
-            # collapse to classes
-            self._collapse_nodes()._collapse_edges()
-            self.collapsed = True
-
-        return self
-    
-
-    def _to_onehot_nodes(self, num_classes: int=None) -> DenseGraph:
-        if self.x is not None:
-            self.x = one_hot(self.x, num_classes = num_classes, dtype=torch.float)
-        return self
-    
-    def _to_onehot_edges(self, num_classes: int=None) -> DenseGraph:
-        if self.edge_adjmat is not None:
-            self.edge_adjmat = one_hot(self.edge_adjmat, num_classes = num_classes, dtype=torch.float)
-        return self
-
-
-    def to_onehot(self, num_classes_x: int=None, num_classes_e: int=None) -> DenseGraph:
-
-        if self.collapsed:
-            self._to_onehot_nodes(num_classes_x)._to_onehot_edges(num_classes_e)
-
-            self.collapsed = False
-    
-        return self
-    
 
     def get_edge_mask_dense(self) -> Tensor:
         if not hasattr(self, 'edge_mask') or self.edge_mask is None:

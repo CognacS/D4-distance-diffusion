@@ -306,7 +306,9 @@ class QM9Resources(DataResources):
             include_pos: bool = False,
             include_charges: bool = False,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            pre_transform_raw=None,
+            pre_filter_raw=None
         ):
 
         super().__init__()
@@ -319,7 +321,9 @@ class QM9Resources(DataResources):
             'kekulize': kekulize,
             'hard_remove_hydrogens': hard_remove_hydrogens,
             'include_pos': include_pos,
-            'include_charges': include_charges
+            'include_charges': include_charges,
+            'pre_transform_raw': pre_transform_raw,
+            'pre_filter_raw': pre_filter_raw
         }
         self.smiles_cfg = {
             'sanitize': sanitize,

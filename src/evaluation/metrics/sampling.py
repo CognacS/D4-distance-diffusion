@@ -86,16 +86,9 @@ class BondDistanceDistributionMetric(BaseSamplingMetric):
         generated_dist_to_save_not_bonded = []
         bond_type_s = []
 
-        atom_type = []
-
         for mol in generated_graphs:
             
-            mol = mol.clone().collapse()
-            
-            if len(atom_type)==0:
-                atom_type=mol.x.tolist()
-            else:
-                atom_type=atom_type+mol.x.tolist()
+            mol = mol.clone().collapse('edge_attr')
                 
             dist = torch.cdist(mol.node_pos, mol.node_pos)
             #dist_vector_1 = mol.attribute_edge.reshape(mol.x.shape[0], mol.x.shape[0])

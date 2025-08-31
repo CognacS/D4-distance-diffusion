@@ -175,7 +175,6 @@ class TrainLossDistance(nn.Module):
     def __init__(
             self,
             lambda_train_E: float = 1.,
-            lambda_train_ext_E: float = 1.,
             concat_edges: bool = False,
             weighted: bool = False,
             class_weighted: bool = False,
@@ -183,7 +182,6 @@ class TrainLossDistance(nn.Module):
         ):
         super().__init__()
         self.lambda_train_E = lambda_train_E
-        self.lambda_train_ext_E = lambda_train_ext_E
         self.concat_edges = concat_edges
         self.weighted = weighted
         self.class_weighted = class_weighted
@@ -204,11 +202,11 @@ class TrainLossDistance(nn.Module):
         true_y : tensor -- (bs, )
         log : boolean. """
 
-        assert not self.weighted or (self.weighted and len(pred_values) == 8), "If weighted, pred_values must contain masks"
+        assert not self.weighted or (self.weighted and len(pred_values) == 5), "If weighted, pred_values must contain masks"
 
 
-        pred_x, pred_e, pred_dist, pred_ext_e, pred_ext_dist, nodes_mask, triang_edge_mask, edges_mask = pred_values
-        true_x, true_e, true_dist, true_ext_e, true_ext_dist = true_values
+        pred_x, pred_e, pred_dist, nodes_mask, triang_edge_mask = pred_values
+        true_x, true_e, true_dist = true_values
 
         # compute cross entropy loss
         reduction = 'mean' if reduce else 'none'
@@ -226,24 +224,13 @@ class TrainLossDistance(nn.Module):
         loss_e = F.cross_entropy(pred_e, true_e, reduction=reduction_to_do, weight=edge_class_weights) if true_e.numel() > 0 else torch.zeros(1, device=pred_x.device)
         loss_dist = F.mse_loss(pred_dist, true_dist, reduction=reduction_to_do) if true_dist.numel() > 0 else torch.zeros(1, device=pred_x.device)
         
-        if true_ext_e is not None:
-            loss_ext_e = F.cross_entropy(pred_ext_e, true_ext_e, reduction=reduction_to_do, weight=edge_class_weights) if true_ext_e.numel() > 0 else torch.zeros(1, device=pred_x.device)
-            loss_ext_dist = F.mse_loss(pred_ext_dist, true_ext_dist, reduction=reduction_to_do) if true_ext_dist.numel() > 0 else torch.zeros(1, device=pred_x.device)
-        else:
-            loss_ext_e = torch.tensor([0.], device=pred_x.device)
-            loss_ext_dist = torch.tensor([0.], device=pred_x.device)
-        
+        total_loss: Tensor = loss_x.mean() + self.lambda_train_E * loss_e.mean() + loss_dist.mean()
 
-        
-        total_loss: Tensor = loss_x.mean() + self.lambda_train_E * loss_e.mean() + loss_dist.mean() + self.lambda_train_ext_E * loss_ext_e.mean() + loss_ext_dist.mean()
-        
         if ret_log:
             to_log = {
                 labels.DENOISE_CE_X: loss_x.detach(),
                 labels.DENOISE_CE_E: loss_e.detach(),
                 labels.DENOISE_MSE_DIST: loss_dist.detach(),
-                labels.DENOISE_CE_EXT_E: loss_ext_e.detach(),
-                labels.DENOISE_MSE_EXT_DIST: loss_ext_dist.detach(),
                 labels.DENOISE_TOTAL: total_loss.detach()
             }
             return total_loss, to_log

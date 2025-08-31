@@ -3,7 +3,6 @@ from typing import Dict
 from torch_geometric.transforms import BaseTransform
 from src.datatypes.sparse import SparseGraph
 from src.data.transforms.core import TransformAdapter
-from src.data.datasets.core import DataResources
 
 from src.datatypes.utils import one_hot
 
@@ -11,29 +10,27 @@ from src.data.transforms import reg_transforms
 
 
 class ToOneHotGraph(BaseTransform):
-    def __init__(self, num_classes_node, num_classes_edge, **kwargs):
+    def __init__(self, attrs_to_num_cls, **kwargs):
         super().__init__(**kwargs)
-        self.num_classes_node = num_classes_node
-        self.num_classes_edge = num_classes_edge
+        self.attrs_to_num_cls = attrs_to_num_cls
 
     def forward(self, data: SparseGraph):
-        return data.to_onehot(self.num_classes_node, self.num_classes_edge)
+        return data.to_onehot(self.attrs_to_num_cls)
 
     def __repr__(self):
-        return '{}(num_classes_node={}, num_classes_edge={})'.format(
-            self.__class__.__name__, self.num_classes_node, self.num_classes_edge
+        return '{}({})'.format(
+            self.__class__.__name__, self.attrs_to_num_cls
         )
 
 
 @reg_transforms.register('to_onehot_graph')
 class ToOneHotGraphAdapter(TransformAdapter):
 
-    def instantiate(self, data_resources: DataResources, **kwargs) -> BaseTransform:
+    def instantiate(self, data_resources, **kwargs) -> BaseTransform:
         info = data_resources.info_total
 
         tr = ToOneHotGraph(
-            num_classes_node=info[self.map['num_classes_node']],
-            num_classes_edge=info[self.map['num_classes_edge']]
+            {k: info[v] for k, v in self.map.items()}
         )
 
         return tr
@@ -64,7 +61,7 @@ class ToOneHotAdapter(TransformAdapter):
         super().__init__(map, **kwargs)
         self.attr_name = attr_name
 
-    def instantiate(self, data_resources: DataResources, **kwargs) -> BaseTransform:
+    def instantiate(self, data_resources, **kwargs) -> BaseTransform:
         info = data_resources.info_total
 
         tr = ToOneHot(

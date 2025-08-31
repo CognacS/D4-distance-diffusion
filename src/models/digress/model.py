@@ -927,7 +927,7 @@ class DiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
                 conditioning_y=condition[batch_idx] if condition is not None else None
             )
 
-            graph_batch.collapse()
+            graph_batch.collapse('x', 'edge_attr')
 
             output_batch = graph_batch.to_data_list()
 
