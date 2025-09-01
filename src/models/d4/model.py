@@ -99,8 +99,6 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             # model configurations
             denoising: Dict,
             diffusion: Dict,
-            dist_diffusion: Dict,
-            charge_diffusion: Dict,
 
             # optimizer configuration
             optimizer: Dict,
@@ -140,9 +138,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         # setup config on how to build the model and noise processes
         self.denoising_config = denoising
-        self.diffusion_config = diffusion
-        self.dist_diffusion_config = dist_diffusion
-        self.charge_diffusion_config = charge_diffusion
+        self.diffusion_config = diffusion\
 
         self.time_enc_dim = 16
         self.embed_time = embed_time
@@ -244,7 +240,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         }
         # build all noise processes
         diffusion_procs_per_data = dict_of_noise_processes_from_config(
-            config = self.diffusion_config.params,
+            config = self.diffusion_config.process.params,
             process_kwargs=process_kwargs
         )
         # check that all required processes are present
@@ -267,7 +263,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             labels.DENOISE_CE_C: MeanMetric(),
             labels.DENOISE_CE_E: MeanMetric(),
             labels.DENOISE_ACC_X: MulticlassAccuracy(num_classes=self.data_dims['x'], validate_args=False),
-            labels.DENOISE_ACC_E: MulticlassAccuracy(num_classes=self.data_dims['e'], validate_args=False),
+            labels.DENOISE_ACC_E: MulticlassAccuracy(num_classes=self.data_dims['edge_adjmat'], validate_args=False),
             labels.DENOISE_ACC_C: MulticlassAccuracy(num_classes=self.data_dims['node_charges'], validate_args=False),
             labels.DENOISE_MSE_DIST: MeanMetric(),
             labels.DENOISE_MAE_DIST: MeanAbsoluteError(),
@@ -665,17 +661,13 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         
         # transform the logits to probabilities
         final_graph.x = torch.softmax(final_graph.x, dim=-1)
+        final_graph.node_charges = torch.softmax(final_graph.node_charges, dim=-1)
         final_graph.edge_adjmat = torch.softmax(final_graph.edge_adjmat, dim=-1)
 
         # sample graph at step t-1 from posterior
         generated_graph = self.diffusion_process.sample_posterior(
             original_datapoint =	final_graph,
             current_datapoint =		graph_to_gen,
-            t =						denoising_time
-        )
-        generated_graph = self.diffusion_process_dists.sample_posterior(
-            original_datapoint =	final_graph,
-            current_datapoint =		generated_graph,
             t =						denoising_time
         )
 
@@ -717,12 +709,6 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             num_new_nodes = number_of_nodes,
             device = self.device
         )
-        new_dists = self.diffusion_process_dists.sample_stationary(
-            num_new_nodes = number_of_nodes,
-            device = self.device
-        )
-        new_graph.edge_dist = new_dists.edge_dist
-        del new_dists
 
         # convert the new subgraph to one-hot
         new_graph = to_onehot_data(
@@ -957,17 +943,9 @@ def to_onehot_data(d, **classes_nums):
             d.long(), num_classes = classes_nums[k]
         ).float()
 
-    elif isinstance(d, SparseGraph):
-        ret_d = d.to_onehot(
-            x =	classes_nums['x'],
-            edge_attr = classes_nums['e'],
-            node_charges = classes_nums['c']
-        )
     elif isinstance(d, DenseGraph):
         ret_d = d.to_onehot(
-            x =	classes_nums['x'],
-            edge_adjmat = classes_nums['e'],
-            node_charges = classes_nums['c']
+            {key: classes_nums[key] for key in ['x', 'edge_adjmat', 'node_charges']}
         )
 
     elif isinstance(d, Tensor):
@@ -999,40 +977,4 @@ def mask_data(d, **masks):
         raise NotImplementedError(f'Data of type {type(d)} during mask_data')
 
     return ret_d
-
-
-#################################  ASSERTIONS  #################################
-
-def assert_is_onehot(*data):
-
-    tensor_dims = {
-        'xd': ('dense nodes', 3),
-        'xs': ('sparse nodes', 2),
-        'ed': ('dense edges', 4),
-        'es': ('sparse edges', 2)
-    }
-
-    for i, d in enumerate(data):
-        if isinstance(d, tuple):
-
-            k: str
-            d: Tensor
-            k, d = d
-            
-            assert d.ndim == tensor_dims[k][1], \
-                f'Expected {tensor_dims[k][0]} to be of dimension {tensor_dims[k][1]}, got {d.ndim}'
-
-        elif isinstance(d, DenseGraph):
-            assert not d.collapsed, \
-                'Expected the dense graph to be onehot'
-        
-        elif isinstance(d, SparseGraph):
-            assert_is_onehot(
-                ('xs', d.x),
-                ('es', d.edge_attr)
-            )
-
-        else:
-            raise NotImplementedError(f'Expected {i}-th data to be of type tuple, DenseGraph or SparseGraph, got {type(d)}')
-            
             

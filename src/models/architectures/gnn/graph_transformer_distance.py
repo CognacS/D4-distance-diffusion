@@ -428,6 +428,9 @@ class XEyBlockAttention(nn.Module):
 
 from src.models import reg_architectures
 
+DIM_C = 'node_charges'
+DIM_D = 'edge_dist'
+
 @reg_architectures.register()
 class GraphTransformerDistance(nn.Module):
     """
@@ -457,13 +460,16 @@ class GraphTransformerDistance(nn.Module):
             self.act_fn = nn.SiLU
         else:
             raise ValueError(f"Activation function {act_fn} not recognized")
+        
+        self.input_dims = input_dims
+        self.output_dims = output_dims
 
         self.num_layers = num_layers
         self.use_residuals_inout = use_residuals_inout
         
         self.distance_enc = SinusoidalPosEmb(distance_dim, scale=100.0)
 
-        self.in_dim_x = input_dims[DIM_X]
+        self.in_dim_x = input_dims[DIM_X] + input_dims[DIM_C]
         self.in_dim_e = input_dims[DIM_E] + distance_dim  # distance is added to edges
         self.in_dim_y = input_dims[DIM_Y]
 
@@ -476,6 +482,7 @@ class GraphTransformerDistance(nn.Module):
         self.out_dim_x = output_dims[DIM_X]
         self.out_dim_e = output_dims[DIM_E]
         self.out_dim_y = output_dims[DIM_Y]
+        self.out_dim_c = output_dims[DIM_C]
 
         ###########################  INPUT ENCODERS  ###########################
         # nodes encoder
@@ -528,6 +535,11 @@ class GraphTransformerDistance(nn.Module):
             self.act_fn(),
             nn.Linear(encdec_hidden_dims[DIM_X], self.out_dim_x)
         )
+        self.mlp_out_C = nn.Sequential(
+            nn.Linear(transf_inout_dims[DIM_X], encdec_hidden_dims[DIM_X]),
+            self.act_fn(),
+            nn.Linear(encdec_hidden_dims[DIM_X], self.out_dim_c)
+        )
 
         # edges decoder
         self.mlp_out_E = nn.Sequential(
@@ -556,14 +568,12 @@ class GraphTransformerDistance(nn.Module):
         ) -> DenseGraph:
 
         ########################  ASSERTIONS ON INPUT  #########################
-        X, E, y, D = graph.x, graph.edge_adjmat, graph.y, graph.edge_dist
+        X, E, y, D, C = graph.x, graph.edge_adjmat, graph.y, graph.edge_dist, graph.node_charges
 
-        assert X.shape[-1] == self.in_dim_x, \
-            f"X.shape[-1] = {X.shape[-1]}, self.in_dim_x = {self.in_dim_x}"
-        assert E.shape[-1] == self.in_dim_e - self.distance_enc.dim, \
-            f"E.shape[-1] = {E.shape[-1]}, self.in_dim_e = {self.in_dim_e}"
-        assert y is None or y.shape[-1] == self.in_dim_y, \
-            f"y.shape[-1] = {y.shape[-1]}, self.in_dim_y = {self.in_dim_y}"
+        assert X.shape[-1] == self.input_dims[DIM_X]
+        assert E.shape[-1] == self.input_dims[DIM_E]
+        assert y is None or y.shape[-1] == self.input_dims[DIM_Y]
+        assert C.shape[-1] == self.input_dims[DIM_C]
 
         bs, nq = X.shape[0], X.shape[1]
 
@@ -585,12 +595,13 @@ class GraphTransformerDistance(nn.Module):
             X_to_out = X[..., :self.out_dim_x]
             E_to_out = E[..., :self.out_dim_e]
             D_to_out = D  # distance is always 1-dimensional
+            C_to_out = C[..., :self.out_dim_c]
             if self.using_y:
                 y_to_out = y[..., :self.out_dim_y]
 
         ###########################  ENCODE INPUTS  ############################
         # special treatment for edges (to make it symmetric (shouldn't this already be?))
-        X = self.mlp_in_X(X)
+        X = self.mlp_in_X(torch.cat([X, C], dim=-1)) # concatenate nodes with charges
         D = self.distance_enc(D)
         E = self.mlp_in_E(torch.cat([E, D], dim=-1))  # concatenate distance to edges
         E = (E + E.transpose(1, 2)) / 2   # new_E should already be symmetric if E is symmetric!!!
@@ -610,6 +621,7 @@ class GraphTransformerDistance(nn.Module):
 
 
         ###########################  DECODE OUTPUT  ############################
+        C = self.mlp_out_C(X)
         X = self.mlp_out_X(X)
         D = self.mlp_out_D(E).squeeze(-1)  # distance is always 1-dimensional
         E = self.mlp_out_E(E)
@@ -619,6 +631,7 @@ class GraphTransformerDistance(nn.Module):
         ###########################  FINAL RESIDUAL  ###########################
         if self.use_residuals_inout:
             X = X + X_to_out
+            C = C + C_to_out
             E = E + E_to_out
             D = D + D_to_out
             
@@ -635,7 +648,15 @@ class GraphTransformerDistance(nn.Module):
                 y = y + y_to_out
         
         # mask everything before returning
-        out_graph = DenseGraph(X, E, y, graph.node_mask, graph.edge_mask, edge_dist=D).apply_mask()
+        out_graph = DenseGraph(
+            x=X,
+            edge_adjmat=E,
+            y=y,
+            node_mask=graph.node_mask,
+            edge_mask=graph.edge_mask,
+            edge_dist=D,
+            node_charges=C
+        ).apply_mask()
 
         ###############################  RETURN  ###############################
 

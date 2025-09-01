@@ -1,8 +1,35 @@
 process:
-    name: graph_marginal
-schedule:
-    name: cosine
     params:
-        max_time: 500
+        x:
+            process:
+                name: discrete_marginal
+            schedule:
+                name: cosine
+                params:
+                    max_time: 500
+
+        node_charges:
+            process:
+                name: discrete_marginal
+            schedule:
+                name: cosine
+                params:
+                    max_time: 500
+
+        edge_adjmat:
+            process:
+                name: discrete_marginal
+            schedule:
+                name: cosine
+                params:
+                    max_time: 500
+
+        edge_dist:
+            process:
+                name: vp_gaussian
+            schedule:
+                name: cosine
+                params:
+                    max_time: 500
 timesampler:
     name: uniform

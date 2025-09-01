@@ -98,9 +98,7 @@ class GraphDiffusionProcess(StructuredMultimodalDiffusionProcess):
     def sample_stationary(
             self,
             num_new_nodes: IntTensor,
-            ext_node_mask: Optional[BoolTensor]=None,
             device: torch.device=None,
-            generate_edges: bool=False,
             shapes: Dict[str, Union[int, Tuple]]=None
         ) -> Tuple[DenseGraph, DenseEdges]:
         
@@ -115,11 +113,10 @@ class GraphDiffusionProcess(StructuredMultimodalDiffusionProcess):
         device = num_new_nodes.device if device is None else device
 
         shape_x = [bs, max_num_nodes]
-        shape_e = [bs, max_num_nodes, ext_node_mask.shape[1]] if generate_edges else [bs, max_num_nodes, max_num_nodes]
+        shape_e = [bs, max_num_nodes, max_num_nodes]
 
         # compute current node mask
         node_mask = torch.arange(max_num_nodes, device=device) < num_new_nodes.unsqueeze(-1)
-        other_node_mask = ext_node_mask if generate_edges else node_mask
         
         sample_kwargs = {}
         for k in self.diffusion_procs_per_data.keys():
@@ -135,18 +132,13 @@ class GraphDiffusionProcess(StructuredMultimodalDiffusionProcess):
                 sample_kwargs[k] = dict(shape=tuple(shape_x + add_shapes))
             elif DenseGraph.is_edge_attr(k):
                 sample_kwargs[k] = dict(shape=tuple(shape_e + add_shapes))
-
-        if generate_edges:
-            cls = DenseEdges
-        else:
-            cls = DenseGraph
             
             
         # sample from stationary distributions
         attrs = super().sample_stationary(sample_kwargs, device=device)
 
         # compute edge mask
-        edge_mask = get_bipartite_edge_mask_dense(node_mask, other_node_mask)
+        edge_mask = get_edge_mask_dense(node_mask)
 
         # transform to undirected graph
         if self.undirected:
@@ -156,7 +148,7 @@ class GraphDiffusionProcess(StructuredMultimodalDiffusionProcess):
                     
 
         # compose graph
-        graph = cls(
+        graph = DenseGraph(
             **attrs,
             node_mask =		node_mask,
             edge_mask =     edge_mask

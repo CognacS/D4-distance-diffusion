@@ -719,7 +719,7 @@ class XEySelfAttention(nn.Module):
 #############  TRANSFORMER OPTIONS  ##############
 
 DIM_X = 'x'
-DIM_E = 'e'
+DIM_E = 'edge_adjmat'
 DIM_Y = 'y'
 
 if False:

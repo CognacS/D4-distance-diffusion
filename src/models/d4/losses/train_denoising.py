@@ -202,11 +202,11 @@ class TrainLossDistance(nn.Module):
         true_y : tensor -- (bs, )
         log : boolean. """
 
-        assert not self.weighted or (self.weighted and len(pred_values) == 5), "If weighted, pred_values must contain masks"
+        assert not self.weighted or (self.weighted and len(pred_values) == 6), "If weighted, pred_values must contain masks"
 
 
-        pred_x, pred_e, pred_dist, nodes_mask, triang_edge_mask = pred_values
-        true_x, true_e, true_dist = true_values
+        pred_x, pred_e, pred_dist, pred_c, nodes_mask, triang_edge_mask = pred_values
+        true_x, true_e, true_dist, true_c = true_values
 
         # compute cross entropy loss
         reduction = 'mean' if reduce else 'none'
@@ -223,13 +223,15 @@ class TrainLossDistance(nn.Module):
         loss_x = F.cross_entropy(pred_x, true_x, reduction=reduction_to_do) if true_x.numel() > 0 else torch.zeros(1, device=pred_x.device)
         loss_e = F.cross_entropy(pred_e, true_e, reduction=reduction_to_do, weight=edge_class_weights) if true_e.numel() > 0 else torch.zeros(1, device=pred_x.device)
         loss_dist = F.mse_loss(pred_dist, true_dist, reduction=reduction_to_do) if true_dist.numel() > 0 else torch.zeros(1, device=pred_x.device)
+        loss_c = F.cross_entropy(pred_c, true_c, reduction=reduction_to_do) if true_c.numel() > 0 else torch.zeros(1, device=pred_c.device)
         
-        total_loss: Tensor = loss_x.mean() + self.lambda_train_E * loss_e.mean() + loss_dist.mean()
+        total_loss: Tensor = loss_x.mean() + loss_c.mean() + self.lambda_train_E * loss_e.mean() + loss_dist.mean()
 
         if ret_log:
             to_log = {
                 labels.DENOISE_CE_X: loss_x.detach(),
                 labels.DENOISE_CE_E: loss_e.detach(),
+                labels.DENOISE_CE_C: loss_c.detach(),
                 labels.DENOISE_MSE_DIST: loss_dist.detach(),
                 labels.DENOISE_TOTAL: total_loss.detach()
             }

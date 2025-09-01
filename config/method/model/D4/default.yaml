@@ -1,7 +1,6 @@
 defaults:
   - _self_
-  - diffusion: uniform_500
-  - dist_diffusion: gaussian_base
+  - diffusion: marginal_500
   - ../architecture@denoising.architecture: graph_transformer/gt_large_distance
 
 
@@ -12,8 +11,6 @@ optimizer:
 denoising:
     loss:
         lambda_train_E: 5.0
-        lambda_train_ext_E: 5.0
-        concat_edges: true
         weighted: true
         class_weighted: false
 
