@@ -176,6 +176,12 @@ def build_molecule(
                         mol.GetAtomWithIdx(idx).SetFormalCharge(1)
                         # print("Formal charge added")
                         
+    try:
+        mol = mol.GetMol()
+    except Chem.KekulizeException:
+        print("Can't kekulize molecule")
+        return None
+                        
     if pos != None:
         positions = pos.double()
         conf = Chem.Conformer(mol.GetNumAtoms())

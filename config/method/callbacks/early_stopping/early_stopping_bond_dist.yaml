@@ -1,0 +1,5 @@
+EarlyStopping:
+    monitor: valid/bond_distance
+    mode: min
+    verbose: true
+    patience: 20

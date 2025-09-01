@@ -1,0 +1,4 @@
+defaults:
+  - others/ema
+  - checkpoint/ema_checkpoint_bond_dist
+  - early_stopping/early_stopping_bond_dist

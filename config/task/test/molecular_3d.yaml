@@ -3,3 +3,4 @@ molecular:
     relaxed: true
     no_computational_metrics: false
     metrics_3d: true
+    distribution_metrics: false

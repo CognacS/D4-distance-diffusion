@@ -27,6 +27,7 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
             data_resources: DataResources,
             relaxed: bool = True,
             no_computational_metrics: bool = True,
+            distribution_metrics: bool = True,
             metrics_3d: bool = False,
             enabled_metrics: str='all',
             metrics_overrides: Dict[str, Dict]=None,
@@ -38,22 +39,25 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
         self.no_computational_metrics = no_computational_metrics
         self.data_resources = data_resources
         self.relaxed = relaxed
+        self.metrics_3d = metrics_3d
+        self.distribution_metrics = distribution_metrics
 
         # load data for novelty, fcd and nspdk
         train_smiles = data_resources.get('smiles', 'train')
-        eval_smiles = data_resources.get('smiles', split)
+        if distribution_metrics:
+            eval_smiles = data_resources.get('smiles', split)
+            eval_nx = mol2nx(smiles2mol(eval_smiles))
         if isinstance(train_smiles[0], tuple):
             train_smiles = [t[0] for t in train_smiles]
             eval_smiles = [t[0] for t in eval_smiles]
-
-        eval_nx = mol2nx(smiles2mol(eval_smiles))
 
         # add metrics of this assignment
         self.add_metric(m_list.KEY_MOLECULAR_VALIDITY, sm.ValidMoleculeMetric)
         self.add_metric(m_list.KEY_MOLECULAR_UNIQUENESS, sm.UniqueMoleculeMetric)
         self.add_metric(m_list.KEY_MOLECULAR_NOVELTY, sm.NovelMoleculeMetric, train_smiles)
-        self.add_metric(m_list.KEY_FCD, sm.FCDMetric, eval_smiles)
-        self.add_metric(m_list.KEY_NSPDK, sm.NSPDKMetric, eval_nx)
+        if distribution_metrics:
+            self.add_metric(m_list.KEY_FCD, sm.FCDMetric, eval_smiles)
+            self.add_metric(m_list.KEY_NSPDK, sm.NSPDKMetric, eval_nx)
         if not self.no_computational_metrics:
             self.add_metric(m_list.KEY_SAMPLING_TIME, cm.SamplingTimeMetric)
             self.add_metric(m_list.KEY_SAMPLING_MEMORY, cm.SamplingMemoryMetric)
@@ -63,7 +67,10 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
 
         self.graph_to_mol_converter: GraphToMoleculeConverter = data_resources.get('decoder')
 
-        self.add_params_to_clone(['data_resources', 'relaxed', 'no_computational_metrics'])
+        self.add_params_to_clone([
+            'data_resources', 'relaxed', 'no_computational_metrics',
+            'metrics_3d', 'distribution_metrics'
+        ])
 
 
 
@@ -101,22 +108,22 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
 
 
         #########################  COMPUTE FCD, NSPDK  #########################
+        if self.distribution_metrics:
+            fixed_mols = self.graph_to_mol_converter(
+                data,
+                override_relaxed=self.relaxed,
+                override_post_hoc_mols_fix=True
+            )
 
-        fixed_mols = self.graph_to_mol_converter(
-            data,
-            override_relaxed=self.relaxed,
-            override_post_hoc_mols_fix=True
-        )
+            # compute FCD from fixed molecules
+            fixed_smiles = mol2smiles(fixed_mols, sanitize=True)
+            ret = self.compute_if_exists(m_list.KEY_FCD, fixed_smiles)
+            gathered_metrics.append(ret)
 
-        # compute FCD from fixed molecules
-        fixed_smiles = mol2smiles(fixed_mols, sanitize=True)
-        ret = self.compute_if_exists(m_list.KEY_FCD, fixed_smiles)
-        gathered_metrics.append(ret)
-
-        # compute NSPDK
-        fixed_nx = mol2nx(fixed_mols)
-        ret = self.compute_if_exists(m_list.KEY_NSPDK, fixed_nx)
-        gathered_metrics.append(ret)
+            # compute NSPDK
+            fixed_nx = mol2nx(fixed_mols)
+            ret = self.compute_if_exists(m_list.KEY_NSPDK, fixed_nx)
+            gathered_metrics.append(ret)
 
         # compute sampling time and memory
         gathered_metrics.extend([
