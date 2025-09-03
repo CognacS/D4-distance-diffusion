@@ -5,7 +5,7 @@ defaults:
  - override /method: d4
  - override /method/trainer: molecular_trainer
  - override /method/dataloader: [base_dataloader, batch_1024, workers_8]
- - override /method/callbacks: ckpt_ema_fcd
+ - override /method/callbacks: ckpt_ema_bond_dist
 
 method:
     model:
@@ -29,9 +29,9 @@ method:
 logger:
     WandbLogger:
         project: d4-generation
-        group: qm9-d4
+        group: gdb13-d4
 
-config_name: qm9-d4
+config_name: gdb13-d4
 
 
 mode: train+eval

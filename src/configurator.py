@@ -718,19 +718,21 @@ class RunContext:
         
         # add filters if any
         addons = {k : None for k in ['pre_filter', 'pre_filter_raw']}
+        dataset_params_mod = deepcopy(dataset_params)
         for k in addons.keys():
-            if k in dataset_params:
-                if dataset_params[k] is not None:
-                    cfg_prefilt = dataset_params[k]
+            if k in dataset_params_mod:
+                if dataset_params_mod[k] is not None:
+                    cfg_prefilt = dataset_params_mod[k]
                     if isinstance(cfg_pretf, list):
                         v = [reg_filters.get_instance_from_dict(tf) for tf in cfg_prefilt]
                     else:
                         v = reg_filters.get_instance_from_dict(cfg_prefilt)
                     addons[k] = v
+                    dataset_params_mod.pop(k, None)
 
         # get dataset resources, also include pre_transform
         data_resources = datasets.reg_dataresources.get_instance(
-            dataset_name, dataset_params, pre_transform=pre_transform, **addons
+            dataset_name, dataset_params_mod, pre_transform=pre_transform, **addons
         )
 
         # add wrappers to dataset if there are any

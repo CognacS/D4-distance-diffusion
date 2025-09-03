@@ -138,7 +138,7 @@ def build_molecule(
         if charges is not None:
             charge = charge_decoder[charges[i].item()]
             if charge != 0:
-                a.SetFormalCharge(charge)
+                a.SetFormalCharge(int(charge))
                 if verbose:
                     print("charge added: ", charge, atom_decoder[atom.item()])
         mol.AddAtom(a)

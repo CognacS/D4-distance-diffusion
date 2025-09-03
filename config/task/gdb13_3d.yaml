@@ -1,0 +1,4 @@
+defaults:
+  - dataset: gdb13_3d
+  - pre_transform: to_onehot_mols
+  - test: molecular_3d

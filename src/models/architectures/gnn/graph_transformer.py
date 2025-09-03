@@ -1118,6 +1118,25 @@ class Etoy(nn.Module):
         out = self.lin(z)
         return out
     
+class EtoX(nn.Module):
+    def __init__(self, de, dx):
+        super().__init__()
+        self.lin = nn.Linear(4 * de, dx)
+
+    def forward(self, E, e_mask2):
+        """ E: bs, n, n, de"""
+        bs, n, _, de = E.shape
+        e_mask2 = e_mask2.expand(-1, n, -1, de)
+        float_imask = 1 - e_mask2.float()
+        m = E.sum(dim=2) / torch.sum(e_mask2, dim=2)
+        mi = (E + 1e5 * float_imask).min(dim=2)[0]
+        ma = (E - 1e5 * float_imask).max(dim=2)[0]
+        std = torch.sum(((E - m[:, :, None, :]) ** 2) * e_mask2, dim=2) / (torch.sum(e_mask2, dim=2)+1e-10)
+        z = torch.cat((m, mi, ma, std), dim=2)
+        out = self.lin(z)
+        return out
+
+    
 def assert_correctly_masked(variable, node_mask):
     if variable.numel() == 0:
         return

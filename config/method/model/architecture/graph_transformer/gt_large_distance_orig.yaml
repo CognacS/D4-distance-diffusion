@@ -1,0 +1,21 @@
+GraphTransformerDistanceOriginal:
+    encdec_hidden_dims:
+        x: 256
+        edge_adjmat: 128
+        y: 128
+
+    transf_inout_dims:
+        x: 256
+        edge_adjmat: 64
+        y: 64
+
+    transf_ffn_dims:
+        x: 256
+        edge_adjmat: 128
+        y: 128
+
+    transf_hparams:
+        heads: 8
+
+    num_layers: 9
+    use_residuals_inout: true

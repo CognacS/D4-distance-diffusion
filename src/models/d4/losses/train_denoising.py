@@ -174,17 +174,17 @@ class TrainLossDistance(nn.Module):
     """ Train with Cross entropy"""
     def __init__(
             self,
+            lambda_train_X: float = 1.,
             lambda_train_E: float = 1.,
-            concat_edges: bool = False,
-            weighted: bool = False,
-            class_weighted: bool = False,
+            lambda_train_C: float = 1.,
+            lambda_train_D: float = 1.,
             **kwargs
         ):
         super().__init__()
+        self.lambda_train_X = lambda_train_X
         self.lambda_train_E = lambda_train_E
-        self.concat_edges = concat_edges
-        self.weighted = weighted
-        self.class_weighted = class_weighted
+        self.lambda_train_C = lambda_train_C
+        self.lambda_train_D = lambda_train_D
 
     def forward(
             self,
@@ -202,30 +202,23 @@ class TrainLossDistance(nn.Module):
         true_y : tensor -- (bs, )
         log : boolean. """
 
-        assert not self.weighted or (self.weighted and len(pred_values) == 6), "If weighted, pred_values must contain masks"
-
-
         pred_x, pred_e, pred_dist, pred_c, nodes_mask, triang_edge_mask = pred_values
         true_x, true_e, true_dist, true_c = true_values
 
         # compute cross entropy loss
         reduction = 'mean' if reduce else 'none'
 
-        reduction_to_do = reduction if not self.weighted else 'none'
-
-        if self.class_weighted:
-            edge_class_weights = torch.full((pred_e.shape[-1],), fill_value=5., device=pred_e.device)
-            edge_class_weights[0] = 1.
-        else:
-            edge_class_weights = None
-
-
-        loss_x = F.cross_entropy(pred_x, true_x, reduction=reduction_to_do) if true_x.numel() > 0 else torch.zeros(1, device=pred_x.device)
-        loss_e = F.cross_entropy(pred_e, true_e, reduction=reduction_to_do, weight=edge_class_weights) if true_e.numel() > 0 else torch.zeros(1, device=pred_x.device)
-        loss_dist = F.mse_loss(pred_dist, true_dist, reduction=reduction_to_do) if true_dist.numel() > 0 else torch.zeros(1, device=pred_x.device)
-        loss_c = F.cross_entropy(pred_c, true_c, reduction=reduction_to_do) if true_c.numel() > 0 else torch.zeros(1, device=pred_c.device)
+        loss_x = F.cross_entropy(pred_x, true_x, reduction=reduction) if true_x.numel() > 0 else torch.zeros(1, device=pred_x.device)
+        loss_e = F.cross_entropy(pred_e, true_e, reduction=reduction) if true_e.numel() > 0 else torch.zeros(1, device=pred_x.device)
+        loss_dist = F.mse_loss(pred_dist, true_dist, reduction=reduction) if true_dist.numel() > 0 else torch.zeros(1, device=pred_x.device)
+        loss_c = F.cross_entropy(pred_c, true_c, reduction=reduction) if true_c.numel() > 0 else torch.zeros(1, device=pred_c.device)
         
-        total_loss: Tensor = loss_x.mean() + loss_c.mean() + self.lambda_train_E * loss_e.mean() + loss_dist.mean()
+        total_loss: Tensor = sum([
+            self.lambda_train_X * loss_x.mean(),
+            self.lambda_train_C * loss_c.mean(),
+            self.lambda_train_E * loss_e.mean(),
+            self.lambda_train_D * loss_dist.mean()
+        ])
 
         if ret_log:
             to_log = {

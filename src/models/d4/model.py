@@ -830,6 +830,8 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             samples_left_to_generate -= to_generate
             batch_idx += 1
             self.console_logger.info(f'Generated {len(samples)}/{num_samples} graphs')
+            
+        #self.log_sampled_graphs(samples, 'molecules')
 
         return samples
     

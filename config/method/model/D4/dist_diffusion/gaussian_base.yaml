@@ -1,8 +1,0 @@
-process:
-    name: distance_gaussian
-schedule:
-    name: cosine
-    params:
-        max_time: 500
-timesampler:
-    name: uniform

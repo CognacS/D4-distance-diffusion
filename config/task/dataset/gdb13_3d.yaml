@@ -1,4 +1,4 @@
-name: qm9
+name: gdb13
 params:
     random_splits:
         train: null
@@ -8,4 +8,5 @@ params:
     include_charges: true
     subset_size: 169550
     num_workers: 8
-    pre_filter_raw: FilterQuickInvalidPosMol
+    pre_filter_raw:
+        FilterQuickInvalidPosMol: {}

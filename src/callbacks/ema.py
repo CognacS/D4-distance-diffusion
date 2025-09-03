@@ -221,6 +221,24 @@ class EMAModelCheckpoint(ModelCheckpoint):
             if isinstance(callback, EMA):
                 ema_callback = callback
         return ema_callback
+    
+    
+    def _remove_other_ema_checkpoints(self, trainer: "pl.Trainer", filepath: str) -> None:
+        # this method is needed to avoid accumulation of EMA checkpoints
+        # this is a workaround for the fact the checkpoint file in ModelCheckpoint is only one
+        # the method checks if there is an old checkpoint with EMA weights and removes it
+        # this would not work when top_k > 1
+        # the only weights kept are the best and the last ones
+        
+        # get the list of all files in the directory
+        directory = os.path.dirname(filepath)
+        filename = os.path.basename(filepath)
+        # get all files in the directory
+        files = os.listdir(directory)
+        for f in files:
+            if ('EMA' in f) and (not 'last' in f) and (f != filename):
+                self._remove_checkpoint(trainer, os.path.join(directory, f))
+
 
     def _save_checkpoint(self, trainer: "pl.Trainer", filepath: str) -> None:
         super()._save_checkpoint(trainer, filepath)
@@ -232,6 +250,7 @@ class EMAModelCheckpoint(ModelCheckpoint):
             if self.verbose:
                 rank_zero_info(f"Saving EMA weights to separate checkpoint {filepath}")
             super()._save_checkpoint(trainer, filepath)
+            self._remove_other_ema_checkpoints(trainer, filepath)
             ema_callback.restore_original_weights(trainer.lightning_module)
 
     def _ema_format_filepath(self, filepath: str) -> str:
