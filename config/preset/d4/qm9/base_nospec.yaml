@@ -15,7 +15,6 @@ method:
             features:
                 - indegree
                 - nodes_num
-                - spectral
             denoising:
                 loss:
                     lambda_train_X: 1.0

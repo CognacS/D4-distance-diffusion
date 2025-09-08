@@ -114,7 +114,7 @@ class MolecularGraphsDataset(ProcessedDataset):
 
     def process(self):
         
-        if self.num_workers > 0:
+        if self.num_workers > 0 and False:
             chunksize = len(self.raw_mol_dataset) // self.num_workers // 5
             
             # transform

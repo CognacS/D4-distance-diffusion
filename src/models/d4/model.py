@@ -160,7 +160,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             'edge_adjmat': dataset_info['num_cls_edges'],
             'node_charges': dataset_info['num_cls_charges'],
             'y': 0 if discard_conditioning else dataset_info['dim_targets'],
-            "dist": 1
+            "edge_dist": 1
         }
 
         self.data_dims['edge_adjmat'] += 1  # account for no-edge class

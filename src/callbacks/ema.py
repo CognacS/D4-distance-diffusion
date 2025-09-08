@@ -230,13 +230,17 @@ class EMAModelCheckpoint(ModelCheckpoint):
         # this would not work when top_k > 1
         # the only weights kept are the best and the last ones
         
+        # do not perform this operation if this checkpoint is 'last' or 'best'
+        if 'last' in filepath or 'best' in filepath:
+            return
+        
         # get the list of all files in the directory
         directory = os.path.dirname(filepath)
         filename = os.path.basename(filepath)
         # get all files in the directory
         files = os.listdir(directory)
         for f in files:
-            if ('EMA' in f) and (not 'last' in f) and (f != filename):
+            if ('EMA' in f) and (not 'last' in f) and (not 'best' in f) and (f != filename):
                 self._remove_checkpoint(trainer, os.path.join(directory, f))
 
 

@@ -440,9 +440,9 @@ class GraphTransformerDistanceOriginal(nn.Module):
         
         # edges encoder
         self.mlp_in_D = nn.Sequential(
-            nn.Linear(distance_dim, encdec_hidden_dims[DIM_E]),
+            nn.Linear(distance_dim, encdec_hidden_dims[DIM_D]),
             self.act_fn(),
-            nn.Linear(encdec_hidden_dims[DIM_E], transf_inout_dims[DIM_E])
+            nn.Linear(encdec_hidden_dims[DIM_D], transf_inout_dims[DIM_D])
         )
 
         if self.using_y:
@@ -463,11 +463,11 @@ class GraphTransformerDistanceOriginal(nn.Module):
                 dx=transf_inout_dims[DIM_X],
                 de=transf_inout_dims[DIM_E],
                 dy=transf_inout_dims[DIM_Y],
-                dd=transf_inout_dims[DIM_E], # distance features have same dim as edges
+                dd=transf_inout_dims[DIM_D], # distance features have same dim as edges
                 dim_ffX=transf_ffn_dims[DIM_X],
                 dim_ffE=transf_ffn_dims[DIM_E],
                 dim_ffy=transf_ffn_dims[DIM_Y],
-                dim_ffD=transf_ffn_dims[DIM_E], # distance features have same dim as edges
+                dim_ffD=transf_ffn_dims[DIM_D], # distance features have same dim as edges
                 last_layer=(i == num_layers - 1),
                 **transf_hparams
             )
@@ -495,9 +495,9 @@ class GraphTransformerDistanceOriginal(nn.Module):
             nn.Linear(encdec_hidden_dims[DIM_E], self.out_dim_e)
         )
         self.mlp_out_D = nn.Sequential(
-            nn.Linear(transf_inout_dims[DIM_E], encdec_hidden_dims[DIM_E]),
+            nn.Linear(transf_inout_dims[DIM_D], encdec_hidden_dims[DIM_D]),
             self.act_fn(),
-            nn.Linear(encdec_hidden_dims[DIM_E], 1)
+            nn.Linear(encdec_hidden_dims[DIM_D], 1)
         )
 
         if self.using_y:
