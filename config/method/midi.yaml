@@ -1,0 +1,6 @@
+defaults:
+  - dataloader: base_dataloader
+  - datatransform: to_undirected
+  - model: midi
+  - trainer: molecular_trainer
+  - callbacks: ckpt

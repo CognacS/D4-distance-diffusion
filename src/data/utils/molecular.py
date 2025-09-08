@@ -85,6 +85,8 @@ def get_molecule_stats(mols: List[Chem.Mol]):
     # BOND_TYPES_REAL_REV maps from rdkit BondType to int
     bonds = sorted(bonds, key=lambda x: BOND_TYPES_REAL_REV[BOND_TYPES_REV[x]])
     charges = list(charges)
+    # reorder charges, such that negative charges come first
+    charges = sorted(charges)
 
     ret_dict = {
         'num_atoms_avg': np.mean(l_num_atoms).item(),

@@ -904,7 +904,7 @@ class DiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             
     
     @torch.no_grad()
-    def sample(
+    def sample_n_graphs(
             self,
             num_samples: int,
             condition: Optional[Dict]=None,

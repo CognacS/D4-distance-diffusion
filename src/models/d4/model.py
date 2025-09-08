@@ -138,7 +138,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         # setup config on how to build the model and noise processes
         self.denoising_config = denoising
-        self.diffusion_config = diffusion\
+        self.diffusion_config = diffusion
 
         self.time_enc_dim = 16
         self.embed_time = embed_time
@@ -796,7 +796,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             
     
     @torch.no_grad()
-    def sample(
+    def sample_n_graphs(
             self,
             num_samples: int,
             conditioning_elems: Optional[Dict]=None,

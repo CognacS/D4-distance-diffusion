@@ -85,7 +85,14 @@ class MolecularGraphsDataset(ProcessedDataset):
         subset.save([self[i] for i in indices], subset.processed_paths[0])
         subset.load(subset.processed_paths[0], SparseGraph)
 
-        new_stats = get_torch_graphs_stats(subset)
+        num_cls = {
+            'x': len(self.mol_to_torch_converter.atom_decoder),
+            'edge_attr': len(self.mol_to_torch_converter.bond_decoder),
+        }
+        if self.include_charges and self.mol_to_torch_converter.charge_decoder is not None:
+            num_cls['node_charges'] = len(self.mol_to_torch_converter.charge_decoder)
+
+        new_stats = get_torch_graphs_stats(subset, num_classes=num_cls)
         subset.stats = deepcopy(self.stats)
         subset.stats.update(new_stats)
         subset.save_file(subset.stats, subset.processed_paths[1])
@@ -124,7 +131,10 @@ class MolecularGraphsDataset(ProcessedDataset):
             )
         else:
             # no parallelization, just convert
-            results = [self._prepare_data_worker(data) for data in tqdm(self.raw_mol_dataset, desc='Converting Chem.Mols to SparseGraphs')]
+            #results = [self._prepare_data_worker(data) for data in tqdm(self.raw_mol_dataset, desc='Converting Chem.Mols to SparseGraphs')]
+            results = []
+            for data in self.raw_mol_dataset:
+                results.append(self._prepare_data_worker(data))
         
         self.pre_transform_filter_and_finalize(results, self.pre_transform, self.pre_filter)
 
@@ -147,15 +157,22 @@ class MolecularGraphsDataset(ProcessedDataset):
                 graph = pre_transform(graph)
 
             graphs.append(graph)
+            
+        num_cls = {
+            'x': len(self.mol_to_torch_converter.atom_decoder),
+            'edge_attr': len(self.mol_to_torch_converter.bond_decoder),
+        }
 
         self.stats = {
-            'num_cls_nodes': len(self.mol_to_torch_converter.atom_decoder),
-            'num_cls_edges': len(self.mol_to_torch_converter.bond_decoder),
-            'num_cls_properties': graphs[0].y.size(0) if hasattr(graphs[0], 'y') and graphs[0].y is not None else 0,
-            **get_torch_graphs_stats(graphs)
+            'num_cls_nodes': num_cls['x'],
+            'num_cls_edges': num_cls['edge_attr'],
+            'num_cls_properties': graphs[0].y.size(0) if hasattr(graphs[0], 'y') and graphs[0].y is not None else 0
         }
         if self.include_charges and self.mol_to_torch_converter.charge_decoder is not None:
-            self.stats['num_cls_charges'] = len(self.mol_to_torch_converter.charge_decoder)
+            num_cls['node_charges'] = len(self.mol_to_torch_converter.charge_decoder)
+            self.stats['num_cls_charges'] = num_cls['node_charges']
+        
+        self.stats.update(get_torch_graphs_stats(graphs, num_classes=num_cls))
         
         self.save(graphs, self.processed_paths[0])
         self.save_file(self.stats, self.processed_paths[1])

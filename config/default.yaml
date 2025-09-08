@@ -1,6 +1,6 @@
 defaults:
- - task: community-small-cdgs
- - method: dummy
+ - task: qm9_3d
+ - method: d4
  - platform: local_1gpu
  - logger: no_logger
  - _self_
