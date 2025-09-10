@@ -40,7 +40,7 @@ class Generator(ABC, pl.LightningModule):
 
 
     @abstractmethod
-    def sample_n_graphs(
+    def sample(
         self,
         num_samples: int,
         conditioning_elems: Optional[Dict]=None,
@@ -189,7 +189,7 @@ class GeneratorWithEvaluation(Generator):
         sampling_kwargs = sampling_kwargs if sampling_kwargs is not None else {}
 
         # sample required graphs
-        samples = self.sample_n_graphs(
+        samples = self.sample(
             num_samples = num_samples,
             conditioning_elems = conditioning_elems,
             **sampling_kwargs

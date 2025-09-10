@@ -44,29 +44,29 @@ def contains_sampling_metrics(metrics: Dict[str, Callable]) -> bool:
 #                          MOLECULAR SAMPLING METRICS                          #
 ################################################################################
 
+
+def compute_bond_types_probabilities(mols: List[Data]):
+    bond_types_counts = torch.zeros(4) # single, double, triple, aromatic
+    total_possible_edges = 0 # this refers to all possible edges, including non-bonded ones!
+
+    for mol in mols:
+        if mol.edge_attr.ndim == 2:
+            edge_attr = mol.edge_attr.argmax(dim=-1)
+        else:
+            edge_attr = mol.edge_attr
+        bond_types_counts.scatter_add_(0, edge_attr, torch.ones_like(edge_attr, dtype=torch.float))
+        total_possible_edges += mol.x.shape[0] * (mol.x.shape[0]-1) # n^2
+        
+    # doesn't need to sum to 1, because not all pairs of atoms are bonded
+    bond_types_probabilities = bond_types_counts / total_possible_edges
+    return bond_types_probabilities
+
 @reg_metrics.register(m_list.KEY_BOND_DISTANCE)
 class BondDistanceDistributionMetric(BaseSamplingMetric):
     def __init__(self, test_mol:  List[Data] = None):
         super().__init__()
         self.test_mol = test_mol
-        self.bond_types_probabilities = self.compute_bond_types_probabilities(test_mol)
-
-
-    def compute_bond_types_probabilities(self, mols: List[Data]):
-        bond_types_counts = torch.zeros(4) # single, double, triple, aromatic
-        total_possible_edges = 0 # this refers to all possible edges, including non-bonded ones!
-
-        for mol in mols:
-            if mol.edge_attr.ndim == 2:
-                edge_attr = mol.edge_attr.argmax(dim=-1)
-            else:
-                edge_attr = mol.edge_attr
-            bond_types_counts.scatter_add_(0, edge_attr, torch.ones_like(edge_attr, dtype=torch.float))
-            total_possible_edges += mol.x.shape[0] * (mol.x.shape[0]-1) # n^2
-            
-        # doesn't need to sum to 1, because not all pairs of atoms are bonded
-        bond_types_probabilities = bond_types_counts / total_possible_edges
-        return bond_types_probabilities
+        self.bond_types_probabilities = compute_bond_types_probabilities(test_mol)
 
 
     def compute_distance_diff(
@@ -174,6 +174,24 @@ class BondDistanceDistributionMetric(BaseSamplingMetric):
             m_list.KEY_BOND_DISTANCE: w1,
             'bond_distance_per_class': {
                 k: v for k, v in zip(['single', 'double', 'triple', 'aromatic'], w1_per_class.tolist())
+            }
+        }
+        
+        return ret
+    
+    
+@reg_metrics.register(m_list.KEY_EDGE_TYPES_DISTRIBUTION)
+class EdgeTypeDistributionMetric(BaseSamplingMetric):
+    def __init__(self):
+        super().__init__()
+
+
+    def __call__(self, data: List[Data]):
+        bond_types_freqs = compute_bond_types_probabilities(data)
+
+        ret = {
+            m_list.KEY_EDGE_TYPES_DISTRIBUTION: {
+                k: v for k, v in zip(['single', 'double', 'triple', 'aromatic'], bond_types_freqs.tolist())
             }
         }
         

@@ -6,6 +6,7 @@ params:
         test: 10000
     include_pos: true
     include_charges: true
+    hard_remove_hydrogens: false
     subset_size: 169550
     num_workers: 8
     pre_filter_raw:

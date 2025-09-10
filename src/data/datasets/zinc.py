@@ -94,6 +94,9 @@ class Zinc(MolecularGraphsDataset):
             remove_hydrogens: bool = True,
             kekulize: bool = True,
             hard_remove_hydrogens: bool = True,
+            include_pos: bool = False,
+            include_charges: bool = False,
+            num_workers: int = 0,
             properties_computer_function: Optional[Callable] = None,
             pre_transform_raw=None,
             pre_filter_raw=None,
@@ -116,7 +119,9 @@ class Zinc(MolecularGraphsDataset):
             root, split=split, raw_mol_dataset=raw_dataset,
             atom_types=raw_dataset.atom_types, bond_types=raw_dataset.bond_types,
             hard_remove_hydrogens=hard_remove_hydrogens,
-            transform=transform, pre_transform=pre_transform, pre_filter=pre_filter
+            include_pos=include_pos, include_charges=include_charges,
+            transform=transform, pre_transform=pre_transform, pre_filter=pre_filter,
+            num_workers=num_workers
         )
 
 
@@ -133,22 +138,32 @@ class ZincResources(BaseDigResources):
             remove_hydrogens: bool = True,
             kekulize: bool = True,
             hard_remove_hydrogens: bool = True,
+            include_pos: bool = False,
+            include_charges: bool = False,
+            num_workers: int = 0,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            pre_transform_raw=None,
+            pre_filter_raw=None
         ):
         
-        qm9_cfg = {
+        zinc_cfg = {
             'sanitize': sanitize,
             'remove_hydrogens': remove_hydrogens,
             'kekulize': kekulize,
-            'hard_remove_hydrogens': hard_remove_hydrogens
+            'hard_remove_hydrogens': hard_remove_hydrogens,
+            'include_pos': include_pos,
+            'include_charges': include_charges,
+            'num_workers': num_workers,
+            'pre_transform_raw': pre_transform_raw,
+            'pre_filter_raw': pre_filter_raw,
         }
         smiles_cfg = {} # here in case this is needed in the future
 
         super().__init__(
             root=root,
             random_splits=random_splits,
-            dataset_cfg=qm9_cfg,
+            dataset_cfg=zinc_cfg,
             smiles_cfg=smiles_cfg,
             dataset_cls=Zinc,
             smiles_cls=ZincSmiles,

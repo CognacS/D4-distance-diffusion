@@ -296,11 +296,15 @@ def mask_distributions(probs, node_mask):
     row_E = torch.zeros(probs.E.size(-1), dtype=torch.float, device=device)
     row_E[0] = 1.
 
-    probs.X[~node_mask] = row_X
-    probs.charges[~node_mask] = row_charges
+    #probs.X[~node_mask] = row_X # this line is prone to errors in some releases of pytorch, I fixed it with a workaround
+    probs.X[~node_mask] = row_X.view(1,1,-1).expand_as(probs.X)[~node_mask]
+    #probs.charges[~node_mask] = row_charges
+    probs.charges[~node_mask] = row_charges.view(1,1,-1).expand_as(probs.charges)[~node_mask]
 
     diag_mask = ~torch.eye(node_mask.size(1), device=node_mask.device, dtype=torch.bool).unsqueeze(0)
-    probs.E[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = row_E
+    edge_mask = node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask
+    #probs.E[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = row_E
+    probs.E[~edge_mask] = row_E.view(1,1,1,-1).expand_as(probs.E)[~edge_mask]
 
     probs.X = probs.X + 1e-7
     probs.X = probs.X / torch.sum(probs.X, dim=-1, keepdim=True)

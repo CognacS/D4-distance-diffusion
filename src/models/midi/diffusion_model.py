@@ -42,7 +42,6 @@ class CompatibilityDatasetInfos:
     # MiDi compatible dataset_infos object
     
     def __init__(self, dataset_info):
-        self.num_atom_types = dataset_info['num_cls_nodes']
 
         # Train + val + test for n_nodes
         n_nodes = dataset_info['num_nodes_hist']
@@ -61,8 +60,29 @@ class CompatibilityDatasetInfos:
         #self.valency_distribution = statistics['train'].valencies
         self.max_n_nodes = max_n_nodes
         
-        self.input_dims = utils.PlaceHolder(X=self.num_atom_types, charges=3, E=5, y=1, pos=3)
-        self.output_dims = utils.PlaceHolder(X=self.num_atom_types, charges=3, E=5, y=0, pos=3)
+        self.num_atom_types = self.atom_types.size(0)
+        self.num_edge_types = self.edge_types.size(0)
+        self.num_charges = self.charges_marginals.size(0)
+        
+        self.input_dims = utils.PlaceHolder(X=self.num_atom_types, charges=self.num_charges, E=self.num_edge_types, y=1, pos=3)
+        self.output_dims = utils.PlaceHolder(X=self.num_atom_types, charges=self.num_charges, E=self.num_edge_types, y=0, pos=3)
+    
+    
+    def to_one_hot(self, X, charges, E, node_mask):
+        if X.ndim == 2:
+            X = F.one_hot(X, num_classes=self.num_atom_types).float()
+        if E.ndim == 3:
+            E = F.one_hot(E, num_classes=self.num_edge_types).float()
+        if charges.ndim == 2:
+            charges = F.one_hot(charges.long(), num_classes=self.num_charges).float()
+        placeholder = utils.PlaceHolder(X=X, charges=charges, E=E,  y=None, pos=None)
+        pl = placeholder.mask(node_mask)
+        return pl.X, pl.charges, pl.E
+
+    def one_hot_charges(self, charges):
+        if charges.ndim == 2:
+            charges = F.one_hot(charges.long(), num_classes=self.num_charges).float()
+        return charges
 
 
 @reg_models.register('MiDiModel')
@@ -169,12 +189,21 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         self.log_every_steps = cfg.general.log_every_steps
         self.number_chain_steps = cfg.general.number_chain_steps
+        
+    
+    # compatibility method to rename data fields
+    def prepare_batch(self, data):
+        data.pos = data.node_pos
+        del data.node_pos
+        data.charges = data.node_charges
+        del data.node_charges
+        return data
+        
 
     def training_step(self, data, i):
         
         # compatibility line
-        data.pos = data.node_pos
-        del data.node_pos
+        data = self.prepare_batch(data)
         
         if data.edge_index.numel() == 0:
             print("Found a batch with no edges. Skipping.")
@@ -201,8 +230,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
 
     def validation_step(self, data, i):
         # compatibility line
-        data.pos = data.node_pos
-        del data.node_pos
+        data = self.prepare_batch(data)
         
         dense_data = utils.to_dense(data, self.dataset_infos)
         z_t = self.noise_model.apply_noise(dense_data)
@@ -253,7 +281,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         #     self.val_sampling_metrics(samples, self.name, self.current_epoch, self.local_rank)
         # self.print(f"Val epoch {self.current_epoch} ends")
         # MiDi evaluation is replaced with the framework one
-        self.on_evaluation_epoch_end(which='val')
+        self.on_evaluation_epoch_end(which='valid')
         
 
     def on_test_epoch_start(self):
@@ -264,8 +292,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
 
     def test_step(self, data, i):
         # compatibility line
-        data.pos = data.node_pos
-        del data.node_pos
+        data = self.prepare_batch(data)
         
         dense_data = utils.to_dense(data, self.dataset_infos)
         z_t = self.noise_model.apply_noise(dense_data)
@@ -349,8 +376,8 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         self.on_evaluation_epoch_end(which='test')
         
         
-    def on_evaluation_epoch_end(self, which='val'):
-        if which == 'val':
+    def on_evaluation_epoch_end(self, which='valid'):
+        if which == 'valid':
             assignment = self.valid_assignment
         else:
             assignment = self.test_assignment
@@ -361,7 +388,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         if assignment is not None:
         
-            batch_size = self.generation_config['batch_size']
+            batch_size = self.BS
         
             # compute sampling metrics
             assignment_results, hists = self.perform_assignment(
@@ -411,10 +438,15 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         limit_dist = self.noise_model.get_limit_dist().device_as(probX)
 
         # Set masked rows , so it doesn't contribute to loss
-        probX[~node_mask] = limit_dist.X.float()
-        probc[~node_mask] = limit_dist.charges.float()
+        # this line is prone to errors in some releases of pytorch, I fixed it with a workaround
+        # probX[~node_mask] = limit_dist.X.float()
+        probX[~node_mask] = limit_dist.X.view(1,1,-1).expand_as(probX)[~node_mask]
+        #probc[~node_mask] = limit_dist.charges.float()
+        probc[~node_mask] = limit_dist.charges.view(1,1,-1).expand_as(probc)[~node_mask]
         diag_mask = ~torch.eye(node_mask.size(1), device=node_mask.device, dtype=torch.bool).unsqueeze(0)
-        probE[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = limit_dist.E.float()
+        edge_mask = node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask
+        #probE[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = limit_dist.E.float()
+        probE[~edge_mask] = limit_dist.E.view(1,1,1,-1).expand_as(probE)[~edge_mask]
 
         kl_distance_X = F.kl_div(input=probX.log(), target=limit_dist.X[None, None, :], reduction='none')
         kl_distance_E = F.kl_div(input=probE.log(), target=limit_dist.E[None, None, None, :], reduction='none')
@@ -538,56 +570,80 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
             z_s = self.sample_zs_from_zt(z_t=z_t, s_int=s_array)
 
             # Save the first keep_chain graphs
-            if (s_int * number_chain_steps) % self.T == 0:
-                write_index = number_chain_steps - 1 - ((s_int * number_chain_steps) // self.T)
-                discrete_z_s = z_s.collapse(self.dataset_infos.collapse_charges)
-                chains.X[write_index] = discrete_z_s.X[:keep_chain]
-                chains.charges[write_index] = discrete_z_s.charges[:keep_chain]
-                chains.E[write_index] = discrete_z_s.E[:keep_chain]
-                chains.pos[write_index] = discrete_z_s.pos[:keep_chain]
+            # if (s_int * number_chain_steps) % self.T == 0:
+            #     write_index = number_chain_steps - 1 - ((s_int * number_chain_steps) // self.T)
+            #     discrete_z_s = z_s.collapse(self.dataset_infos.collapse_charges)
+            #     chains.X[write_index] = discrete_z_s.X[:keep_chain]
+            #     chains.charges[write_index] = discrete_z_s.charges[:keep_chain]
+            #     chains.E[write_index] = discrete_z_s.E[:keep_chain]
+            #     chains.pos[write_index] = discrete_z_s.pos[:keep_chain]
 
             z_t = z_s
 
         # Sample final data
-        sampled = z_t.collapse(self.dataset_infos.collapse_charges)
+        sampled = z_t.collapse()#self.dataset_infos.collapse_charges)
         X, charges, E, y, pos = sampled.X, sampled.charges, sampled.E, sampled.y, sampled.pos
+        
+        # this is compatibility code, here I transform dense graphs to sparse to be digested
+        # by the assignment
+        # first, prepare a batched DenseGraph
+        dense_graph = DenseGraph(
+            x = X,
+            edge_adjmat = E,
+            y = y,
+            node_pos = pos,
+            node_charges = charges,
+            node_mask = node_mask
+        ).apply_mask()
+        # then transform DenseGraph to SparseGraph (batched)
+        output_graph = sparsify_data(
+            subgraph = dense_graph,
+            subgraph_nodes_num = n_nodes,
+        )
+        # finally, transform SparseGraph (batched) to a list of SparseGraph objects
+        output_graphs = output_graph.to_data_list()
+        
+        return output_graphs
+        
+        
+        ######################  END OF COMPATIBILITY CODE  #####################
 
-        chains.X[-1] = X[:keep_chain]  # Overwrite last frame with the resulting X, E
-        chains.charges[-1] = charges[:keep_chain]
-        chains.E[-1] = E[:keep_chain]
-        chains.pos[-1] = pos[:keep_chain]
+        # chains.X[-1] = X[:keep_chain]  # Overwrite last frame with the resulting X, E
+        # chains.charges[-1] = charges[:keep_chain]
+        # chains.E[-1] = E[:keep_chain]
+        # chains.pos[-1] = pos[:keep_chain]
 
-        molecule_list = []
-        for i in range(batch_size):
-            n = n_nodes[i]
-            atom_types = X[i, :n]
-            charge_vec = charges[i, :n]
-            edge_types = E[i, :n, :n]
-            conformer = pos[i, :n]
-            molecule_list.append(Molecule(atom_types=atom_types, charges=charge_vec,
-                                          bond_types=edge_types, positions=conformer,
-                                          atom_decoder=self.dataset_infos.atom_decoder))
+        # molecule_list = []
+        # for i in range(batch_size):
+        #     n = n_nodes[i]
+        #     atom_types = X[i, :n]
+        #     charge_vec = charges[i, :n]
+        #     edge_types = E[i, :n, :n]
+        #     conformer = pos[i, :n]
+        #     molecule_list.append(Molecule(atom_types=atom_types, charges=charge_vec,
+        #                                   bond_types=edge_types, positions=conformer,
+        #                                   atom_decoder=self.dataset_infos.atom_decoder))
 
         # Visualize chains
-        if keep_chain > 0:
-            self.print('Batch sampled. Visualizing chains starts!')
-            chains_path = os.path.join(os.getcwd(), f'chains/epoch{self.current_epoch}/',
-                                       f'batch{batch_id}_GR{self.global_rank}')
-            os.makedirs(chains_path, exist_ok=True)
+        # if keep_chain > 0:
+        #     self.print('Batch sampled. Visualizing chains starts!')
+        #     chains_path = os.path.join(os.getcwd(), f'chains/epoch{self.current_epoch}/',
+        #                                f'batch{batch_id}_GR{self.global_rank}')
+        #     os.makedirs(chains_path, exist_ok=True)
 
-            visualizer.visualize_chains(chains_path, chains,
-                                        num_nodes=n_nodes[:keep_chain],
-                                        atom_decoder=self.dataset_infos.atom_decoder)
+        #     visualizer.visualize_chains(chains_path, chains,
+        #                                 num_nodes=n_nodes[:keep_chain],
+        #                                 atom_decoder=self.dataset_infos.atom_decoder)
 
-        if save_final > 0:
-            self.print(f'Visualizing {save_final} individual molecules...')
+        # if save_final > 0:
+        #     self.print(f'Visualizing {save_final} individual molecules...')
 
-        # Visualize the final molecules
-        current_path = os.getcwd()
-        result_path = os.path.join(current_path, f'graphs/epoch{self.current_epoch}_b{batch_id}/')
-        _ = visualizer.visualize(result_path, molecule_list, num_molecules_to_visualize=save_final)
-        self.print("Visualizing done.")
-        return molecule_list
+        # # Visualize the final molecules
+        # current_path = os.getcwd()
+        # result_path = os.path.join(current_path, f'graphs/epoch{self.current_epoch}_b{batch_id}/')
+        # _ = visualizer.visualize(result_path, molecule_list, num_molecules_to_visualize=save_final)
+        # self.print("Visualizing done.")
+        # return molecule_list
 
     def sample_zs_from_zt(self, z_t, s_int):
         """Samples from zs ~ p(zs | zt). Only used during sampling.
@@ -708,3 +764,41 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=self.cfg.train.lr, amsgrad=True,
                                  weight_decay=self.cfg.train.weight_decay)
+
+
+from src.datatypes import dense
+from src.datatypes.dense import DenseGraph
+from torch import IntTensor
+
+def sparsify_data(
+        subgraph: DenseGraph,
+        subgraph_nodes_num: IntTensor,
+    ):
+
+    ########################  SPARSIFY DENSE SUBGRAPH  #########################
+    subgraph = subgraph.clone()
+
+    # remove self-loops from dense adjacency matrices
+    subgraph.edge_adjmat = dense.dense_remove_self_loops(
+        subgraph.edge_adjmat
+    )
+
+    # remove no edge class from dense adjacency
+    # matrices
+    # subgraph.edge_adjmat = dense.remove_no_edge(
+    #     subgraph.edge_adjmat,
+    #     sparse = False,
+    #     collapsed = True
+    # )
+
+    # transform the new graph to sparse format
+    new_subgraph = dense.dense_graph_to_sparse_graph(
+        dense_graph =	subgraph,
+        num_nodes =		subgraph_nodes_num,
+        batchify =      True
+    )
+    
+    # correct collapsed classes in edge_attr
+    new_subgraph.edge_attr = new_subgraph.edge_attr - 1
+
+    return new_subgraph

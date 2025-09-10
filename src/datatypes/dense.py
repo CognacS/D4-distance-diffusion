@@ -534,6 +534,8 @@ def dense_to_sparse(
 
     if adj.dim() == 4:
         adj_collapsed = adj.sum(dim=-1)
+    else:
+        adj_collapsed = adj
 
     edge_index = adj_collapsed.nonzero().t()
 

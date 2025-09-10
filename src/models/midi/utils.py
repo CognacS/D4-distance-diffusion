@@ -63,8 +63,13 @@ def to_dense(data, dataset_info, device=None):
     assert pos.mean(dim=1).abs().max() < 1e-3
     charges, _ = to_dense_batch(x=data.charges, batch=data.batch)
     max_num_nodes = X.size(1)
-    edge_index, edge_attr = remove_self_loops(data.edge_index, data.edge_attr)
-    E = to_dense_adj(edge_index=edge_index, batch=data.batch, edge_attr=edge_attr, max_num_nodes=max_num_nodes)
+    if data.edge_attr.ndim == 2:
+        edge_attr = data.edge_attr.argmax(-1)
+    else:
+        edge_attr = data.edge_attr
+    edge_index, edge_attr = remove_self_loops(data.edge_index, edge_attr)
+    # add 1 to edge_attr to account for no-bond class
+    E = to_dense_adj(edge_index=edge_index, batch=data.batch, edge_attr=edge_attr+1, max_num_nodes=max_num_nodes)
 
     X, charges, E = dataset_info.to_one_hot(X, charges=charges, E=E, node_mask=node_mask)
 
@@ -124,17 +129,18 @@ class PlaceHolder:
         assert torch.allclose(self.E, torch.transpose(self.E, 1, 2))
         return self
 
-    def collapse(self, collapse_charges):
+    def collapse(self):#, collapse_charges):
         copy = self.copy()
         copy.X = torch.argmax(self.X, dim=-1)
-        copy.charges = collapse_charges.to(self.charges.device)[torch.argmax(self.charges, dim=-1)]
+        #copy.charges = collapse_charges.to(self.charges.device)[torch.argmax(self.charges, dim=-1)]
+        copy.charges = torch.argmax(self.charges, dim=-1)
         copy.E = torch.argmax(self.E, dim=-1)
         x_mask = self.node_mask.unsqueeze(-1)  # bs, n, 1
         e_mask1 = x_mask.unsqueeze(2)  # bs, n, 1, 1
         e_mask2 = x_mask.unsqueeze(1)  # bs, 1, n, 1
         copy.X[self.node_mask == 0] = - 1
         copy.charges[self.node_mask == 0] = 1000
-        copy.E[(e_mask1 * e_mask2).squeeze(-1) == 0] = - 1
+        #copy.E[(e_mask1 * e_mask2).squeeze(-1) == 0] = - 1
         return copy
 
     def __repr__(self):

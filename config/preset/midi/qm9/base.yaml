@@ -22,9 +22,9 @@ method:
 logger:
     WandbLogger:
         project: d4-generation
-        group: qm9-d4
+        group: qm9-midi
 
-config_name: qm9-d4
+config_name: qm9-midi
 
 
 mode: train+eval

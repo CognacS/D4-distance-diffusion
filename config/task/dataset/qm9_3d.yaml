@@ -6,3 +6,4 @@ params:
         test: 10000
     include_pos: true
     include_charges: true
+    hard_remove_hydrogens: false

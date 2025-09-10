@@ -21,6 +21,7 @@ KEY_MOLECULAR_VALIDITY = 'molecular_validity'
 KEY_MOLECULAR_UNIQUENESS = 'molecular_uniqueness'
 KEY_MOLECULAR_NOVELTY = 'molecular_novelty'
 KEY_BOND_DISTANCE = 'bond_distance'
+KEY_EDGE_TYPES_DISTRIBUTION = 'edge_types_distribution'
 
 # number of connected components (on molecules, needs validity metric)
 KEY_MOLECULAR_CONN_COMP = 'molecular_conn_comp'

@@ -385,7 +385,9 @@ class MarginalDiscreteDiffusionProcess(DiscreteDiffusionProcess):
             self,
             schedule : NoiseSchedule,
             num_cls: int,
-            minimum_number_updates: int=100
+            marginals: Tensor=None,
+            minimum_number_updates: int=100,
+            **kwargs
         ):
         """
         Parameters
@@ -395,13 +397,24 @@ class MarginalDiscreteDiffusionProcess(DiscreteDiffusionProcess):
         """
         # call super for the NoiseProcess
         super().__init__(schedule=schedule, num_cls=num_cls)
+        
+        if marginals is not None:
+            if not isinstance(marginals, Tensor):
+                marginals = torch.tensor(marginals, dtype=torch.float)
 
-        self.accumulating = True
-        self.curr_num_updates = 0
-        self.minimum_number_updates = minimum_number_updates
+            self.accumulating = False
+            self.curr_num_updates = 0
+            self.minimum_number_updates = 0
 
-        self.register_buffer('histogram', torch.zeros(num_cls))
-        self.register_buffer('marginal', torch.zeros(num_cls))
+            self.register_buffer('marginal', marginals)
+            self.register_buffer('histogram', torch.zeros(num_cls))
+        else:
+            self.accumulating = True
+            self.curr_num_updates = 0
+            self.minimum_number_updates = minimum_number_updates
+
+            self.register_buffer('histogram', torch.zeros(num_cls))
+            self.register_buffer('marginal', torch.zeros(num_cls))
 
 
     
@@ -424,6 +437,6 @@ class MarginalDiscreteDiffusionProcess(DiscreteDiffusionProcess):
         
 
     def stationary_distribution(self, device, **kwargs):
-        if self.curr_num_updates == 0:
+        if self.curr_num_updates == 0 and self.accumulating:
             return torch.ones(self.num_cls, device=device) / self.num_cls
         return self.marginal

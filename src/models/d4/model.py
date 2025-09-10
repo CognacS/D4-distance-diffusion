@@ -238,6 +238,13 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             'edge_adjmat': {'num_cls': self.data_dims['edge_adjmat']},
             'node_charges': {'num_cls': self.data_dims['node_charges']}
         }
+        # directly add marginals if they are available in the dataset_info
+        if 'marginals' in dataset_info:
+            marginals = dataset_info['marginals']
+            process_kwargs['x']['marginals'] = marginals['x']
+            process_kwargs['edge_adjmat']['marginals'] = marginals['edge_attr']
+            process_kwargs['node_charges']['marginals'] = marginals['node_charges']
+        
         # build all noise processes
         diffusion_procs_per_data = dict_of_noise_processes_from_config(
             config = self.diffusion_config.process.params,
@@ -796,7 +803,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             
     
     @torch.no_grad()
-    def sample_n_graphs(
+    def sample(
             self,
             num_samples: int,
             conditioning_elems: Optional[Dict]=None,

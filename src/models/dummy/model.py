@@ -122,7 +122,7 @@ class DummyModel(GeneratorWithEvaluation):
 
     
     @torch.no_grad()
-    def sample_n_graphs(self,
+    def sample(self,
             num_samples=None,
             **kwargs
         ):

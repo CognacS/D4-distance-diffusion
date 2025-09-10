@@ -55,6 +55,7 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
         self.add_metric(m_list.KEY_MOLECULAR_VALIDITY, sm.ValidMoleculeMetric)
         self.add_metric(m_list.KEY_MOLECULAR_UNIQUENESS, sm.UniqueMoleculeMetric)
         self.add_metric(m_list.KEY_MOLECULAR_NOVELTY, sm.NovelMoleculeMetric, train_smiles)
+        self.add_metric(m_list.KEY_EDGE_TYPES_DISTRIBUTION, sm.EdgeTypeDistributionMetric)
         if distribution_metrics:
             self.add_metric(m_list.KEY_FCD, sm.FCDMetric, eval_smiles)
             self.add_metric(m_list.KEY_NSPDK, sm.NSPDKMetric, eval_nx)
@@ -84,7 +85,8 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
         ##################  COMPUTE SPATIAL METRICS (IF ANY)  ##################
         
         gathered_metrics.extend([
-            self.compute_if_exists(m_list.KEY_BOND_DISTANCE, data)
+            self.compute_if_exists(m_list.KEY_BOND_DISTANCE, data),
+            self.compute_if_exists(m_list.KEY_EDGE_TYPES_DISTRIBUTION, data)
         ])
 
         ###############  COMPUTE VALIDITY, UNIQUENESS, NOVELTY  ################
