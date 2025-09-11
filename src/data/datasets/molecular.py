@@ -121,19 +121,21 @@ class MolecularGraphsDataset(ProcessedDataset):
 
     def process(self):
         
+        dataset = [self.raw_mol_dataset[i] for i in range(len(self.raw_mol_dataset))]
+        
         if self.num_workers > 0:
-            chunksize = len(self.raw_mol_dataset) // self.num_workers // 5
+            chunksize = len(dataset) // self.num_workers // 5
             
             # transform
             results = process_map(
-                self._prepare_data_worker, self.raw_mol_dataset,
+                self._prepare_data_worker, dataset,
                 max_workers=self.num_workers, desc='Converting Chem.Mols to SparseGraphs', chunksize=chunksize,
             )
         else:
             # no parallelization, just convert
             #results = [self._prepare_data_worker(data) for data in tqdm(self.raw_mol_dataset, desc='Converting Chem.Mols to SparseGraphs')]
             results = []
-            for data in self.raw_mol_dataset:
+            for data in tqdm(dataset, desc='Converting Chem.Mols to SparseGraphs'):
                 results.append(self._prepare_data_worker(data))
         
         self.pre_transform_filter_and_finalize(results, self.pre_transform, self.pre_filter)
