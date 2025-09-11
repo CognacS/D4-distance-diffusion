@@ -296,6 +296,7 @@ class MolecularDataset(RawDataset):
             self.stats = self.load(self.raw_paths[2])
             self.atom_types = self.stats['atom_types']
             self.bond_types = self.stats['bond_types']
+            self.charges = self.stats['charges'] if 'charges' in self.stats else None
 
 
     def subset_from(self, indices: List[int], name: str):
@@ -318,9 +319,11 @@ class MolecularDataset(RawDataset):
         stats_new = molutils.get_molecule_stats(subset.mols)
         stats_new['atom_types'] = self.atom_types # use old atom types
         stats_new['bond_types'] = self.bond_types # use old bond types
+        stats_new['charges'] = self.charges # use old charges
         subset.stats = stats_new
         subset.atom_types = self.atom_types
         subset.bond_types = self.bond_types
+        subset.charges = self.charges
         
         # store data in files
         subset.save(subset.stats, subset.raw_paths[2])
@@ -370,6 +373,7 @@ class MolecularDataset(RawDataset):
         self.stats = molutils.get_molecule_stats(self.mols)
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
+        self.charges = self.stats['charges']
         
         # store data in files
         self.save(self.stats, self.raw_paths[2])

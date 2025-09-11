@@ -118,6 +118,7 @@ class Zinc(MolecularGraphsDataset):
         super().__init__(
             root, split=split, raw_mol_dataset=raw_dataset,
             atom_types=raw_dataset.atom_types, bond_types=raw_dataset.bond_types,
+            charges=raw_dataset.charges,
             hard_remove_hydrogens=hard_remove_hydrogens,
             include_pos=include_pos, include_charges=include_charges,
             transform=transform, pre_transform=pre_transform, pre_filter=pre_filter,

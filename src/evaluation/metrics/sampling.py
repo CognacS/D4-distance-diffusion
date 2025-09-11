@@ -89,7 +89,7 @@ class BondDistanceDistributionMetric(BaseSamplingMetric):
         for mol in generated_graphs:
             
             mol = mol.clone().collapse('edge_attr')
-                
+            
             dist = torch.cdist(mol.node_pos, mol.node_pos)
             #dist_vector_1 = mol.attribute_edge.reshape(mol.x.shape[0], mol.x.shape[0])
             dist_vector_1 = dist[dist!=0]

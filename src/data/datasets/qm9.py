@@ -57,7 +57,7 @@ class QM9Raw(RawDataset):
             self,
             root: Optional[str] = None,
             split: Optional[str] = None,
-            sanitize: bool = True,
+            sanitize: bool = False,
             remove_hydrogens: bool = True,
             kekulize: bool = True,
             pre_transform=None,
@@ -150,7 +150,9 @@ class QM9Raw(RawDataset):
         skip_list = prepare_skip_list(skip_file)
 
         # last round of processing
-        self.mols, self.props = self._prepare_data(mols, props, skip_list)
+        self.mols, self.props = self._prepare_data(
+            mols, props, skip_list, 
+        )
 
         # filter data if needed
         if self.pre_filter is not None:
@@ -177,7 +179,7 @@ class QM9Raw(RawDataset):
 
 
         
-    def _prepare_data(self, mols, props, skip_list):
+    def _prepare_data( self, mols, props, skip_list):
 
         final_mols, final_props = [], []
 
@@ -203,6 +205,9 @@ class QM9Raw(RawDataset):
             if mol is None:     # skip if molecule is None (e.g., sanitization failed)
                 skipped_sanitization += 1
                 continue
+            
+            if self.remove_hydrogens:
+                mol = molutils.remove_hydrogens_from_molecule(mol)
 
             if self.kekulize:
                 mol = molutils.kekulize_molecule(mol)
@@ -226,10 +231,10 @@ class QM9(MolecularGraphsDataset):
             self,
             root: Optional[str] = None,
             split: Optional[str] = None,
-            sanitize: bool = True,
+            sanitize: bool = False,
             remove_hydrogens: bool = True,
             kekulize: bool = True,
-            hard_remove_hydrogens: bool = True,
+            hard_remove_hydrogens: bool = False,
             include_pos: bool = False,
             include_charges: bool = False,
             pre_transform_raw=None,
@@ -299,10 +304,10 @@ class QM9Resources(DataResources):
             self,
             random_splits: Dict,
             root: Optional[str] = None,
-            sanitize: bool = True,
+            sanitize: bool = False,
             remove_hydrogens: bool = True,
             kekulize: bool = True,
-            hard_remove_hydrogens: bool = True,
+            hard_remove_hydrogens: bool = False,
             include_pos: bool = False,
             include_charges: bool = False,
             pre_transform=None,
