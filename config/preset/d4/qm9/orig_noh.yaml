@@ -34,7 +34,7 @@ logger:
         project: d4-generation
         group: qm9-d4
 
-config_name: qm9-d4-orig
+config_name: qm9-d4-orig-noh
 
 
 mode: train+eval

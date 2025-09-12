@@ -143,7 +143,7 @@ class SpectralFeature(Feature):
 class EigenDistanceFeature(Feature):
 
     def get_added_dims(self):
-        return {'dist': 1}
+        return {'edge_dist': 1}
 
     def __call__(self, graph: Data) -> Data:
         
