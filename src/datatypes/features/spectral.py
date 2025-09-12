@@ -136,3 +136,51 @@ class SpectralFeature(Feature):
                 cat_feature(graph, 'x', nonlcc_indicator, node_masks, batches)
             if k_lowest_eigenvector is not None:
                 cat_feature(graph, 'x', k_lowest_eigenvector, node_masks, batches)
+                
+                
+                
+@reg_features.register('eigen_distance')
+class EigenDistanceFeature(Feature):
+
+    def get_added_dims(self):
+        return {'dist': 1}
+
+    def __call__(self, graph: Data) -> Data:
+        
+        A = graph.edge_adjmat[..., 1:].sum(dim=-1).float() * graph.node_mask.unsqueeze(1) * graph.node_mask.unsqueeze(2)
+        diag = torch.sum(A, dim=-1)
+        n = diag.shape[-1]
+        D = torch.diag_embed(diag)
+        combinatorial = D - A
+        diag0 = diag.clone()
+        diag[diag == 0] = 1e-12
+        diag_norm = 1 / torch.sqrt(diag)
+        D_norm = torch.diag_embed(diag_norm) 
+        L = torch.eye(n).unsqueeze(0).to(graph.x.device) - D_norm @ A @ D_norm
+        L[diag0 == 0] = 0
+        (L + L.transpose(1, 2)) / 2
+        
+        mask_diag = 2 * L.shape[-1] * torch.eye(A.shape[-1], device=L.device).unsqueeze(0)
+        mask_diag = mask_diag * (~graph.node_mask.unsqueeze(1)) * (~graph.node_mask.unsqueeze(2))
+        L = L * graph.node_mask.unsqueeze(1) * graph.node_mask.unsqueeze(2) + mask_diag
+        
+        eigvals, eigvectors = torch.linalg.eigh(L)
+        eigvals = eigvals / torch.sum(graph.node_mask, dim=1, keepdim=True)
+        eigvectors = eigvectors * graph.node_mask.unsqueeze(2) * graph.node_mask.unsqueeze(1)
+        '''
+        n_connected = (eigvals < 1e-5).sum(dim=-1)
+        
+        k=5
+        
+        # Get the eigenvectors corresponding to the first nonzero eigenvalues
+        to_extend = max(n_connected) + k - n
+                             # bs, n, k
+        first_k_ev = torch.gather(eigvectors, dim=2, 
+                                  index=(torch.arange(k, device=eigvectors.device).repeat(32).reshape(32,5)+n_connected.unsqueeze(1)).unsqueeze(1).expand(-1,n,-1))       # bs, n, k
+        first_k_ev = first_k_ev * graph.node_mask.unsqueeze(2)
+
+        graph.eigen=graph.first_k_ev
+        '''
+        graph.edge_dist=torch.concat([graph.edge_dist.unsqueeze(1), eigvectors.unsqueeze(1)], dim=1)
+        graph.edge_dist=graph.edge_dist.permute(0,2,3,1)
+        return graph

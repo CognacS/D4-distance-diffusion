@@ -18,6 +18,13 @@ method:
         early_stopping:
             EarlyStopping:
                 patience: 20
+    model:
+        params:
+            cfg:
+                model:
+                    batch_size: 1024
+            validation:
+                how_many_to_generate: 1024
 
 logger:
     WandbLogger:

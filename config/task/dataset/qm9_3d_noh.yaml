@@ -1,5 +1,6 @@
-name: gdb13
+name: qm9
 params:
+    root: 'datasets/qm9_noh'
     random_splits:
         train: null
         valid: 10000
@@ -9,8 +10,4 @@ params:
     sanitize: false
     kekulize: true
     remove_hydrogens: true
-    hard_remove_hydrogens: false
-    subset_size: 169550
-    num_workers: 8
-    pre_filter_raw:
-        FilterQuickInvalidPosMol: {}
+    hard_remove_hydrogens: True
