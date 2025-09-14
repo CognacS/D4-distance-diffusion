@@ -778,6 +778,8 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         updated_node_pos = mds(new_dist.float(), edge_mask=edge_mask)
             
         new_graph_dense.node_pos = updated_node_pos
+        # include distances as global attrs for slicing and metrics
+        new_graph_dense.global_dist = new_graph_dense.edge_dist
         del new_graph_dense.edge_dist
 
         ########################################################################
