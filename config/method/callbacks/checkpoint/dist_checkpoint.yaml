@@ -1,3 +1,3 @@
 ModelCheckpoint:
-    monitor: 'valid_denoising/total_loss'
+    monitor: 'valid_denoising/denoise_total'
     mode: min

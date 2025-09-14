@@ -266,8 +266,12 @@ def build_graph_from_molecule(
     
     if include_pos:
         addons['node_pos'] = pos
+        if hard_remove_hydrogens:
+            addons['node_pos'] = addons['node_pos'][to_keep]
     if include_charges:
         addons['node_charges'] = charges
+        if hard_remove_hydrogens:
+            addons['node_charges'] = addons['node_charges'][to_keep]
 
     g = SparseGraph(
         x=x,
