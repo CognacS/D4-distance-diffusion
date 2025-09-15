@@ -55,7 +55,7 @@ def compute_bond_types_probabilities(mols: List[Data]):
             edge_attr = mol.edge_attr.argmax(dim=-1)
         else:
             edge_attr = mol.edge_attr
-        bond_types_counts.scatter_add_(0, edge_attr, torch.ones_like(edge_attr, dtype=torch.float))
+        bond_types_counts.scatter_add_(0, edge_attr, torch.ones_like(edge_attr, dtype=torch.float, device=edge_attr.device))
         total_possible_edges += mol.x.shape[0] * (mol.x.shape[0]-1) # n^2
         
     # doesn't need to sum to 1, because not all pairs of atoms are bonded

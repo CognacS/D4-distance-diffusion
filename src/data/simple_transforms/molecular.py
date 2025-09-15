@@ -268,6 +268,8 @@ def build_graph_from_molecule(
         addons['node_pos'] = pos
         if hard_remove_hydrogens:
             addons['node_pos'] = addons['node_pos'][to_keep]
+            # recompute center
+            addons['node_pos'] = addons['node_pos'] - torch.mean(addons['node_pos'], dim=0, keepdim=True)
     if include_charges:
         addons['node_charges'] = charges
         if hard_remove_hydrogens:
