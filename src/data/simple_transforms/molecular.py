@@ -30,13 +30,13 @@ ATOM_VALENCY = {6: 4, 7: 3, 8: 2, 9: 1, 15: 3, 16: 2, 17: 1, 35: 1, 53: 1}
 CHARGE_ENCODER = {0: 0, -1: 1, 1: 2}
 
 @batched
-def mol2smiles(mol, sanitize=True):
+def mol2smiles(mol, sanitize=False, isomeric=False):
     if sanitize:
         try:
             Chem.SanitizeMol(mol)
         except ValueError:
             return None
-    smiles = Chem.MolToSmiles(mol, canonical=True)
+    smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=isomeric)
 
     return smiles
 
@@ -266,8 +266,12 @@ def build_graph_from_molecule(
     
     if include_pos:
         addons['node_pos'] = pos
+        if hard_remove_hydrogens:
+            addons['node_pos'] = addons['node_pos'][to_keep]
     if include_charges:
         addons['node_charges'] = charges
+        if hard_remove_hydrogens:
+            addons['node_charges'] = addons['node_charges'][to_keep]
 
     g = SparseGraph(
         x=x,

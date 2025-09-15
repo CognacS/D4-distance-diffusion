@@ -19,7 +19,7 @@ def read_molecules(filepath: str, sanitize: bool=False, remove_hydrogens: bool=F
 
         suppl = Chem.SDMolSupplier(
             filepath,
-            removeHs=remove_hydrogens,
+            removeHs=remove_hydrogens, # warning: this does not actually remove hydrogens
             sanitize=sanitize
         )
 
@@ -46,6 +46,11 @@ def kekulize_molecule(mol):
     Chem.Kekulize(mol)
     return mol
 
+def remove_hydrogens_from_molecule(mol):
+    """ Remove hydrogens from a molecule.
+    """
+
+    return Chem.RemoveHs(mol, sanitize=False)
 
 
 def get_molecule_stats(mols: List[Chem.Mol]):

@@ -17,6 +17,7 @@ from collections import Counter
 
 from src.data.simple_transforms.molecular import mol2smiles, GraphToMoleculeConverter
 from src.datatypes.utils import one_hot
+from src.datatypes.dense import to_dense_adj_bipartite
 
 from src.evaluation.metrics.core import Metric
 
@@ -88,8 +89,10 @@ class BondDistanceDistributionMetric(BaseSamplingMetric):
 
         for mol in generated_graphs:
             
-            mol = mol.clone().collapse('edge_attr')
-                
+            mol = mol.clone()
+            if mol.edge_attr.ndim > 1:
+                mol = mol.collapse('edge_attr')
+            
             dist = torch.cdist(mol.node_pos, mol.node_pos)
             #dist_vector_1 = mol.attribute_edge.reshape(mol.x.shape[0], mol.x.shape[0])
             dist_vector_1 = dist[dist!=0]
@@ -178,7 +181,139 @@ class BondDistanceDistributionMetric(BaseSamplingMetric):
         }
         
         return ret
+
+
+
+@reg_metrics.register(m_list.KEY_PREBOND_DISTANCE)
+class bond_distance_distribution(BaseSamplingMetric):
+    def __init__(self, test_mol:  List[str] = None):
+        super().__init__()
+        self.test_mol = test_mol
+        self.bond_types_probabilities = compute_bond_types_probabilities(test_mol)
+        
+    def compute_distance_diff(
+        self,
+        generated_graphs: List[Data]
+    ):
+
+        sum_t_ = {0: 0, 1: 0, 2: 0, 3:0}
+        for t in self.test_mol:
+            elem = torch.argmax(t.edge_attr,1)
+            for e in elem.tolist():
+                sum_t_[e]+=1
+
+        generated_bond_lenghts = {1: Counter(), 2: Counter(), 3: Counter(), 4: Counter()}
+
+        generated_dist_to_save = []
+        generated_dist_to_save_not_bonded = []
+        bond_type_s = []
+
+        atom_type = []
+
+        for mol in generated_graphs:
+            
+            mol = mol.clone()
+            if mol.edge_attr.ndim > 1:
+                mol = mol.collapse('edge_attr')
+            
+            if len(atom_type)==0:
+                atom_type=mol.x.tolist()
+            else:
+                atom_type=atom_type+mol.x.tolist()
+            
+            dist = mol.global_dist[..., :mol.x.shape[0], :mol.x.shape[0]]
+            dist_vector_1 = dist.reshape(mol.x.shape[0], mol.x.shape[0])
+            dist_vector_1 = dist_vector_1[dist_vector_1!=0]
+            distances_to_consider_1 = torch.round(dist_vector_1, decimals=2)
+
+            edge_tensor = (to_dense_adj(mol.edge_index, edge_attr=mol.edge_attr+1, max_num_nodes=mol.x.shape[0])!=0).squeeze(0)
+            dist_vector = torch.mul(dist.reshape(mol.x.shape[0], mol.x.shape[0]), (edge_tensor!=0).int()).squeeze(0)
+            dist_vector = dist_vector[dist_vector!=0]
+
+            distances_to_consider = torch.round(dist_vector, decimals=2)
+            if len(generated_dist_to_save)==0:
+                generated_dist_to_save=distances_to_consider.tolist()
+                generated_dist_to_save_not_bonded=distances_to_consider_1.tolist()
+                bond_type_s = (mol.edge_attr+1).tolist()
+            else:
+                generated_dist_to_save=generated_dist_to_save+distances_to_consider.tolist()
+                generated_dist_to_save_not_bonded = generated_dist_to_save_not_bonded+distances_to_consider_1.tolist()
+                bond_type_s = bond_type_s + (mol.edge_attr+1).tolist()
+
+            for i, d in enumerate(distances_to_consider):
+                generated_bond_lenghts[mol.edge_attr[i].item()+1][d.item()] += 1
+
+
+        for bond_type in range(1,5):
+            s = sum(generated_bond_lenghts[bond_type].values())
+            if s == 0:
+                s = 1
+            for d, count in generated_bond_lenghts[bond_type].items():
+                generated_bond_lenghts[bond_type][d] = count / s
+
+        target = {1: Counter(), 2: Counter(), 3: Counter(), 4: Counter()}
+        for test in self.test_mol:
+            edge_tensor = (to_dense_adj(test.edge_index, edge_attr=torch.argmax(test.edge_attr,1)+1, max_num_nodes=test.x.shape[0])!=0)
+            dist = torch.cdist(test.node_pos, test.node_pos)
+            dist_vector = torch.mul(dist, (edge_tensor!=0).int()).squeeze(0)
+            dist_vector = dist_vector[dist_vector!=0]
+            distances_to_consider = torch.round(dist_vector, decimals=2)
+            for i, d in enumerate(distances_to_consider):
+                    target[torch.argmax(test.edge_attr,1)[i].item()+1][d.item()] += 1
+
+        for bond_type in range(1,5):
+            s = sum(target[bond_type].values())
+            if s == 0:
+                s = 1
+            for d, count in target[bond_type].items():
+                target[bond_type][d] = count / s
+
+
+        min_generated_length = min(min(d.keys()) if len(d) > 0 else 1e4 for d in generated_bond_lenghts.values())
+        min_target_length = min(min(d.keys()) if len(d) > 0 else 1e4 for d in target.values())
+        min_length = min(min_generated_length, min_target_length)
+
+        max_generated_length = max(max(bl.keys()) if len(bl) > 0 else -1 for bl in generated_bond_lenghts.values())
+        max_target_length = max(max(bl.keys()) if len(bl) > 0 else -1 for bl in target.values())
+        max_length = max(max_generated_length, max_target_length)
+
+        num_bins = int((max_length - min_length) * 100) + 1
+        generated_bond_lengths = torch.zeros(4, num_bins)
+        target_bond_lengths = torch.zeros(4, num_bins)
+
+        for bond_type in range(1,5):
+            for d, count in generated_bond_lenghts[bond_type].items():
+                bin = int((d - min_length) * 100)
+                generated_bond_lengths[bond_type - 1, bin] = count
+            for d, count in target[bond_type].items():
+                bin = int((d - min_length) * 100)
+                target_bond_lengths[bond_type - 1, bin] = count
+
+        cs_generated = torch.cumsum(generated_bond_lengths, dim=1)
+        cs_target = torch.cumsum(target_bond_lengths, dim=1)
+
+        w1_per_class = torch.sum(torch.abs(cs_generated - cs_target), dim=1) / 100    # 100 because of bin size
+        
+        weighted = w1_per_class * self.bond_types_probabilities.to(device=w1_per_class.device)
+            
+        return torch.sum(weighted).item(), w1_per_class
+
+        # if np.average(total_len)>=24:
+        #     return torch.sum(w1_per_class*torch.tensor([0.1547,0.0255,0.003,0]))  # these values are chosen equally to MiDi paper to be reproducible, these represent the frequency of bonds considering also no bonds type
+        # else:    
+        #     return torch.sum(w1_per_class*torch.tensor([0.0079, 0.0273, 0.2388, 0])) # these values are chosen equally to MiDi paper to be reproducible, these represent the frequency of bonds considering also no bonds type
     
+    def __call__(self, data: List[Data]):
+        w1, w1_per_class = self.compute_distance_diff(data)
+        ret = {
+            m_list.KEY_PREBOND_DISTANCE: w1,
+            'prebond_distance_per_class': {
+                k: v for k, v in zip(['single', 'double', 'triple', 'aromatic'], w1_per_class.tolist())
+            }
+        }
+        
+        return ret
+
     
 @reg_metrics.register(m_list.KEY_EDGE_TYPES_DISTRIBUTION)
 class EdgeTypeDistributionMetric(BaseSamplingMetric):

@@ -182,6 +182,7 @@ class BaseDigResources(DataResources):
 
         # if there is any pre_transform, solve any transform adapter
         self.preproc['pre_transform'] = self.transforms_to_pipeline(self.preproc['pre_transform'])
+        self.preproc['pre_filter'] = self.filters_to_pipeline(self.preproc['pre_filter'])
 
         try: # try to get the split datasets
 
@@ -202,8 +203,8 @@ class BaseDigResources(DataResources):
 
             # reload dataset with preprocessing
             if self.preproc['pre_transform'] is not None:
-                ds.delete()
-                ds = self.dataset_cls(self.root, **self.preproc, **self.dataset_cfg)
+                print('Applying preprocessing to the whole dataset')
+                ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
 
             test_indices = ds_smiles.get_test_indices()
             other_indices = [i for i in range(len(ds)) if i not in test_indices]

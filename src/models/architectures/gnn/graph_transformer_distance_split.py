@@ -410,6 +410,7 @@ class GraphTransformerDistanceOriginal(nn.Module):
         self.in_dim_x = input_dims[DIM_X] + input_dims[DIM_C]
         self.in_dim_e = input_dims[DIM_E]
         self.in_dim_y = input_dims[DIM_Y]
+        self.in_dim_d = input_dims[DIM_D]
 
         self.encdec_hidden_dims = encdec_hidden_dims
         self.transf_inout_dims = transf_inout_dims
@@ -439,8 +440,13 @@ class GraphTransformerDistanceOriginal(nn.Module):
         )
         
         # edges encoder
+        # self.mlp_in_D = nn.Sequential(
+        #     nn.Linear(distance_dim, encdec_hidden_dims[DIM_D]),
+        #     self.act_fn(),
+        #     nn.Linear(encdec_hidden_dims[DIM_D], transf_inout_dims[DIM_D])
+        # )
         self.mlp_in_D = nn.Sequential(
-            nn.Linear(distance_dim, encdec_hidden_dims[DIM_D]),
+            nn.Linear(self.in_dim_d, encdec_hidden_dims[DIM_D]),
             self.act_fn(),
             nn.Linear(encdec_hidden_dims[DIM_D], transf_inout_dims[DIM_D])
         )
@@ -522,13 +528,15 @@ class GraphTransformerDistanceOriginal(nn.Module):
         assert y is None or y.shape[-1] == self.input_dims[DIM_Y]
         assert C.shape[-1] == self.input_dims[DIM_C]
 
-        bs, nq = X.shape[0], X.shape[1]
+        bs, n = X.shape[0], X.shape[1]
 
         ###############  SETUP SELFLOOP REMOVAL (DIAGONAL) MASK  ###############
         
         node_mask = graph.node_mask.unsqueeze(-1)
         edge_mask = graph.edge_mask.unsqueeze(-1)
         triang_mask = get_edge_mask_dense(edge_mask=graph.edge_mask, only_triangular=True).unsqueeze(-1)
+        diag_mask = ~torch.eye(n, device=graph.x.device, dtype=torch.bool)
+        diag_mask = diag_mask.unsqueeze(0).unsqueeze(-1).expand(bs, -1, -1, -1)
 
         def mask_everything(X, E, D):
 
@@ -550,7 +558,10 @@ class GraphTransformerDistanceOriginal(nn.Module):
         ###########################  ENCODE INPUTS  ############################
         # special treatment for edges (to make it symmetric (shouldn't this already be?))
         X = self.mlp_in_X(torch.cat([X, C], dim=-1)) # concatenate nodes with charges
-        D = self.mlp_in_D(self.distance_enc(D))
+        #D = self.mlp_in_D(self.distance_enc(D))
+        if D.ndim == 3:
+            D = D.unsqueeze(-1)
+        D = self.mlp_in_D(D)
         D = (D + D.transpose(1, 2)) / 2
         E = self.mlp_in_E(E)  # concatenate distance to edges
         E = (E + E.transpose(1, 2)) / 2
@@ -582,14 +593,17 @@ class GraphTransformerDistanceOriginal(nn.Module):
             X = X + X_to_out
             C = C + C_to_out
             E = E + E_to_out
-            D = D + D_to_out
+            #D = D + D_to_out
             
         # remove selfloop and make symmetric
         E = E * triang_mask
-        #E = (E + torch.transpose(E, 1, 2)) / 2 # here it's ok!
+        #E = E * diag_mask
+        #E = (E + E.transpose(1, 2)) / 2
         E = (E + torch.transpose(E, 1, 2))
         
         D = D * triang_mask.squeeze(-1)
+        #D = D * diag_mask.squeeze(-1)
+        #D = (D + D.transpose(1, 2)) / 2
         D = D + torch.transpose(D, 1, 2)
         
         if self.use_residuals_inout:
