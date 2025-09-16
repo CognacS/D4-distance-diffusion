@@ -85,7 +85,7 @@ class CompatibilityDatasetInfos:
         return charges
 
 
-@reg_models.register('MiDiModel')
+@reg_models.register('DummyModel')
 class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
     model_dtype = torch.float32
     best_val_nll = 1e8
@@ -164,7 +164,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         #self.test_sampling_metrics = SamplingMetrics(train_smiles, dataset_infos, test=True)
 
         self.save_hyperparameters(ignore=['train_metrics', 'val_sampling_metrics', 'test_sampling_metrics',
-                                          'dataset_infos', 'train_smiles']
+                                          'dataset_infos', 'train_smiles'] 
                                           + GeneratorWithEvaluation.IGNORED_HPARAMS + ['received_dims'])
 
         self.model = GraphTransformer(input_dims=self.input_dims,
