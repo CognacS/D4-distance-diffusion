@@ -29,6 +29,7 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
             no_computational_metrics: bool = True,
             distribution_metrics: bool = True,
             metrics_3d: bool = False,
+            premetrics_3d: bool = False,
             enabled_metrics: str='all',
             metrics_overrides: Dict[str, Dict]=None,
             **kwargs
@@ -40,6 +41,7 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
         self.data_resources = data_resources
         self.relaxed = relaxed
         self.metrics_3d = metrics_3d
+        self.premetrics_3d = premetrics_3d
         self.distribution_metrics = distribution_metrics
 
         # load data for novelty, fcd and nspdk
@@ -65,13 +67,14 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
         if metrics_3d:
             eval_mols = data_resources.get('dataset', split)
             self.add_metric(m_list.KEY_BOND_DISTANCE, sm.BondDistanceDistributionMetric, eval_mols)
-            #self.add_metric(m_list.KEY_PREBOND_DISTANCE, sm.bond_distance_distribution, eval_mols)
+            if premetrics_3d:
+                self.add_metric(m_list.KEY_PREBOND_DISTANCE, sm.bond_distance_distribution, eval_mols)
 
         self.graph_to_mol_converter: GraphToMoleculeConverter = data_resources.get('decoder')
 
         self.add_params_to_clone([
             'data_resources', 'relaxed', 'no_computational_metrics',
-            'metrics_3d', 'distribution_metrics'
+            'metrics_3d', 'premetrics_3d', 'distribution_metrics'
         ])
 
 
@@ -87,7 +90,7 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
         
         gathered_metrics.extend([
             self.compute_if_exists(m_list.KEY_BOND_DISTANCE, data),
-            #self.compute_if_exists(m_list.KEY_PREBOND_DISTANCE, data),
+            self.compute_if_exists(m_list.KEY_PREBOND_DISTANCE, data),
             self.compute_if_exists(m_list.KEY_EDGE_TYPES_DISTRIBUTION, data)
         ])
 

@@ -1,0 +1,7 @@
+molecular:
+    how_many_to_generate: 10000
+    relaxed: true
+    no_computational_metrics: false
+    metrics_3d: true
+    premetrics_3d: true
+    distribution_metrics: false
