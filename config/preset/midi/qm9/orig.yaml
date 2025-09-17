@@ -16,8 +16,15 @@ method:
             cfg:
                 model:
                     batch_size: 1024
+                    n_layers: 10
+                    lambda_train: [5, 0.4, 1, 2, 0]
             validation:
                 how_many_to_generate: 1024
+
+task:
+    test:
+        molecular:
+            how_many_to_generate: 1024
 
 logger:
     WandbLogger:
