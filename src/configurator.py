@@ -404,6 +404,25 @@ class RunContext:
 
         return curr_metrics
     
+    
+    def find_best_epoch(self, ckpt_folder):
+        """Find the best epoch in a checkpoint folder.
+        """
+        ckpt_files = os.listdir(ckpt_folder)  # list of strings
+        def get_epoch(filename):
+            start = filename.find('epoch=')
+            end = filename.find('-')
+            return int(filename[start+6:end])
+        
+        def filename_ok(filename):
+            return filename.endswith('.ckpt') and 'epoch=' in filename
+        
+        epochs = [(int(get_epoch(filename)), filename) for filename in ckpt_files if filename_ok(filename)]
+        if len(epochs) == 0:
+            return None
+        max_epoch = max(epochs, key=lambda x: x[0])
+        return max_epoch[1]
+    
 
     def evaluate_best(self, validation=True):
         
@@ -414,10 +433,19 @@ class RunContext:
         except ValueError as e:
 
             if 'best' in str(e):
-                self.logger.warning(f'No best checkpoint found, evaluating last checkpoint...')
-
-                # evaluate the model using last checkpoint
-                curr_metrics = self.evaluate_ckpt('last', validation=validation)
+                self.logger.warning(f'No best checkpoint found, trying with checkpoint with highest epoch count...')
+                
+                best_filename = self.find_best_epoch(self.run_directory)
+                
+                if best_filename is not None:
+                    self.logger.warning(f'Found checkpoint {best_filename}, evaluating it...')
+                    # evaluate the model using best checkpoint
+                    filepath = self.run_directory / best_filename
+                    curr_metrics = self.evaluate_ckpt(filepath, validation=validation)
+                else:
+                    self.logger.warning(f'No best checkpoint found, evaluating last checkpoint...')
+                    # evaluate the model using last checkpoint
+                    curr_metrics = self.evaluate_ckpt('last', validation=validation)
 
         return curr_metrics
     

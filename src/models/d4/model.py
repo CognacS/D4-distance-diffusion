@@ -789,7 +789,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         output_graph = sparsify_data(
             subgraph = new_graph_dense,
             subgraph_nodes_num = number_of_nodes,
-        )
+        ).to('cpu')
 
         ########################################################################
         #                                RETURN                                #

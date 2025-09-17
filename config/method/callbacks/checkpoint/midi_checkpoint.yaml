@@ -1,0 +1,3 @@
+ModelCheckpoint:
+    monitor: 'val/epoch_NLL'
+    mode: min
