@@ -1,4 +1,5 @@
-GraphTransformerDistanceOriginal:
+name: GraphTransformerDistanceOriginal
+params:
     encdec_hidden_dims:
         x: 256
         edge_adjmat: 128

@@ -192,7 +192,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         )
 
         # by default, the architecture is a GraphTransformer
-        self.denoising_model = reg_architectures.get_instance_from_dict(
+        self.denoising_model = reg_architectures.get_instance_from_cfg(
             config =        self.denoising_config.architecture,
             input_dims =    self.augmented_dims,
             output_dims =   self.data_dims,

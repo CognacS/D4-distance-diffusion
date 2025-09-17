@@ -1,7 +1,10 @@
 defaults:
   - _self_
   - diffusion: marginal_500
-  - ../architecture@denoising.architecture: graph_transformer/gt_large_distance_orig
+  - /method/model/architecture@denoising.architecture: graph_transformer/gt_large_distance_orig_qm9
+#  - ../architecture@denoising.architecture: graph_transformer/gt_large_distance_orig_qm9_copy
+#  - ../architecture@denoising.architecture: graph_transformer/gt_large_distance_orig_qm9
+#  - ../architecture: graph_transformer/gt_large_distance_orig
 
 
 optimizer:
