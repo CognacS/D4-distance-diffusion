@@ -152,6 +152,10 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         # setup generation
         self.generation_config = generation
+        
+        self.distance_output_mode = self.denoising_config.get('distance_output_mode', 'single')
+        assert self.distance_output_mode in ['single', 'periscopic', 'conditional'], \
+            "distance_output_mode must be one of 'single', 'periscopic', or 'conditional'"
 
         #######################  GRAPHS DIMENSIONS SETUP  ######################
         # setup model input and output dimensions (based on the dataset)
@@ -204,34 +208,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         self.diffusion_timesampler = reg_timesampler.get_instance_from_cfg(
             self.diffusion_config.timesampler
         )
-
-        # self.diffusion_process: GraphDiffusionProcess
-        # self.diffusion_process = reg_diffusion.get_instance_from_cfg(
-        #     self.diffusion_config.process,
-        #     schedule = reg_schedule.get_instance_from_cfg(
-        #         self.diffusion_config.schedule
-        #     ),
-        #     num_cls_x = self.data_dims['x'],
-        #     num_cls_e = self.data_dims['e']
-        # )
-
         
-        # self.diffusion_process_dists: DistanceGaussianDiffusionProcess
-        # self.diffusion_process_dists = reg_diffusion.get_instance_from_cfg(
-        #     self.dist_diffusion_config.process,
-        #     schedule = reg_schedule.get_instance_from_cfg(
-        #         self.dist_diffusion_config.schedule
-        #     ),
-        #     undirected=True
-        # )
-        
-        # self.diffusion_process_charges: DiscreteDiffusionProcess
-        # self.diffusion_process_charges = reg_diffusion.get_instance_from_cfg(
-        #     self.charge_diffusion_config.process,
-        #     schedule = reg_schedule.get_instance_from_cfg(
-        #         self.charge_diffusion_config.schedule
-        #     )
-        # )
         # prepare additional parameters for each process (number of classes)
         process_kwargs = {
             'x': {'num_cls': self.data_dims['x']},
@@ -289,13 +266,77 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
     def is_conditional(self):
         return self.generation_config['conditional']
+    
+    
+    ############################################################################
+    #                          ADDITIONAL TECHNIQUES                           #
+    ############################################################################
+    
+    def aggregate_periscopic_distances(self, edge_dist: Tensor, edge_adjmat: Tensor) -> Tensor:
+        """Periscopic mode adds the distances depending on the edge types.
+        This is based on the assumption that, as the type increases, the distance decreases.
+        For example, if bonds are [0,1,2,3], where 0 is no-bond, then the distance decreases,
+        with the 3-bond being the shortest distance.
+        Additionally, gradient is stopped for greater types, and only flows for the true type.
+        
+        edge_dist: Tensor
+            shape (B,N,N,num_types)
+        edge_adjmat: Tensor
+            shape (B,N,N) or (B,N,N,num_types) in logits/onehot format
+        """
+        if edge_adjmat.ndim == 4:
+            # if edge_adjmat is in logits/onehot format, convert to indices
+            edge_adjmat = edge_adjmat.argmax(dim=-1)
+        
+        # gather greater types
+        # e.g., if type=1, gather types [2,3,...]
+        gt_types_mask = torch.arange(0, self.data_dims['edge_adjmat'], device=edge_adjmat.device).view(1,1,1,-1) # shape (1,1,1,num_types)
+        gt_types_mask = gt_types_mask > edge_adjmat.unsqueeze(-1) # shape (B,N,N,num_types)
+        
+        # sum greater types + detach gradient
+        out_dist = (edge_dist * gt_types_mask).detach().sum(dim=-1)
+        
+        # add true type distance with gradient
+        out_dist = out_dist + edge_dist[edge_adjmat]
+        
+        return out_dist
+        
+        
+    def aggregate_conditional_distances(self, edge_dist: Tensor, edge_adjmat: Tensor) -> Tensor:
+        """Conditional mode returns the distance corresponding to the edge type.
+        
+        edge_dist: Tensor
+            shape (B,N,N,num_types)
+        edge_adjmat: Tensor
+            shape (B,N,N) or (B,N,N,num_types) in logits/onehot format
+        """
+        if edge_adjmat.ndim == 4:
+            # if edge_adjmat is in logits/onehot format, convert to indices
+            edge_adjmat = edge_adjmat.argmax(dim=-1)
+        
+        out_dist = edge_dist[edge_adjmat]
+        
+        return out_dist
+        
+        
+    def postprocess_distances(self, edge_dist: Tensor, edge_adjmat: Tensor) -> None:
+        
+        if self.distance_output_mode == 'periscopic':
+            edge_dist = self.aggregate_periscopic_distances(edge_dist, edge_adjmat)
+        elif self.distance_output_mode == 'conditional':
+            edge_dist = self.aggregate_conditional_distances(edge_dist, edge_adjmat)
+        
+        # apply non-linearity to distances:
+        # silu such that: 0 is reachable (with softplus it is only asymptotically)
+        # and negative distances are unlikely
+        edge_dist = torch.nn.functional.silu(edge_dist)
+        
+        return edge_dist
 
 
     ############################################################################
     #                 SHORTHANDS FOR TRAINING/VALIDATION STEPS                 #
     ############################################################################
-    
-    
     
     def compute_true_pred_denoising(
             self,
@@ -382,6 +423,14 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         gen_batch_dense: DenseGraph
         gen_batch_dense = self.denoising_model(
             graph = noisy_batch_to_generate_dense_onehot
+        )
+        
+        # postprocess distances with the true edge labels
+        # this mode is in teacher forcing, so we don't
+        # make the training noisy
+        gen_batch_dense.edge_dist = self.postprocess_distances(
+            gen_batch_dense.edge_dist,
+            batch_to_generate_dense.edge_adjmat
         )
 
         pred_x = gen_batch_dense.x[node_mask]

@@ -405,7 +405,7 @@ class GraphTransformerDistanceOriginal(nn.Module):
         self.num_layers = num_layers
         self.use_residuals_inout = use_residuals_inout
         
-        self.distance_enc = SinusoidalPosEmb(distance_dim, scale=100.0)
+        #self.distance_enc = SinusoidalPosEmb(distance_dim, scale=100.0)
 
         self.in_dim_x = input_dims[DIM_X] + input_dims[DIM_C]
         self.in_dim_e = input_dims[DIM_E]
@@ -422,6 +422,7 @@ class GraphTransformerDistanceOriginal(nn.Module):
         self.out_dim_e = output_dims[DIM_E]
         self.out_dim_y = output_dims[DIM_Y]
         self.out_dim_c = output_dims[DIM_C]
+        self.out_dim_d = output_dims[DIM_D] # can be > 1, e.g., with periscopic or conditional distances
 
         ###########################  INPUT ENCODERS  ###########################
         # nodes encoder
@@ -503,7 +504,7 @@ class GraphTransformerDistanceOriginal(nn.Module):
         self.mlp_out_D = nn.Sequential(
             nn.Linear(transf_inout_dims[DIM_D], encdec_hidden_dims[DIM_D]),
             self.act_fn(),
-            nn.Linear(encdec_hidden_dims[DIM_D], 1)
+            nn.Linear(encdec_hidden_dims[DIM_D], self.out_dim_d)
         )
 
         if self.using_y:
@@ -596,15 +597,15 @@ class GraphTransformerDistanceOriginal(nn.Module):
             #D = D + D_to_out
             
         # remove selfloop and make symmetric
-        E = E * triang_mask
-        #E = E * diag_mask
-        #E = (E + E.transpose(1, 2)) / 2
-        E = (E + torch.transpose(E, 1, 2))
+        #E = E * triang_mask
+        E = E * diag_mask
+        E = (E + E.transpose(1, 2)) / 2
+        #E = (E + torch.transpose(E, 1, 2))
         
-        D = D * triang_mask.squeeze(-1)
-        #D = D * diag_mask.squeeze(-1)
-        #D = (D + D.transpose(1, 2)) / 2
-        D = D + torch.transpose(D, 1, 2)
+        #D = D * triang_mask.squeeze(-1)
+        D = D * diag_mask.squeeze(-1)
+        D = (D + D.transpose(1, 2)) / 2
+        #D = D + torch.transpose(D, 1, 2)
         
         if self.use_residuals_inout:
             if self.using_y:
