@@ -973,7 +973,7 @@ class RunContext:
         if run_logger is None:
             self.enable_log = False
 
-        self.logger.info(f'Using device: {self.accelerator}, N={self.devices}')
+        self.logger.info(f'Number of nodes: {self.num_nodes}, Type of device: {self.accelerator}, Number of devices={self.devices}, Strategy: {self.strategy}')
         self.logger.info(f'Number of epochs: {cfg_trainer.max_epochs}')
 
         if self.profile:

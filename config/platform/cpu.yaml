@@ -1,2 +1,5 @@
+num_nodes: 1
 accelerator: cpu
-devices: 1
+devices: 1    # also called world_size in case of distributed training
+strategy: auto
+

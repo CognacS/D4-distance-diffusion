@@ -1,2 +1,5 @@
+num_nodes: 1
 accelerator: gpu
-devices: 4
+devices: 4    # also called world_size in case of distributed training
+strategy: ddp
+
