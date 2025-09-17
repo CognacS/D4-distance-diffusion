@@ -970,7 +970,7 @@ class RunContext:
             # computing devices
             accelerator =               self.accelerator,
             devices =                   self.devices,
-            num_nodes=                  num_nodes, 
+            num_nodes=                  num_nodes,
             strategy =                  strategy,
 
             # visualization and debugging
