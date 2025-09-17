@@ -66,6 +66,7 @@ class MolecularAssignment(Assignment, ClonableWithSplitsMixin):
             eval_mols = data_resources.get('dataset', split)
             self.add_metric(m_list.KEY_BOND_DISTANCE, sm.BondDistanceDistributionMetric, eval_mols)
             self.add_metric(m_list.KEY_PREBOND_DISTANCE, sm.bond_distance_distribution, eval_mols)
+            if parametrics_3d
 
         self.graph_to_mol_converter: GraphToMoleculeConverter = data_resources.get('decoder')
 

@@ -956,7 +956,6 @@ class RunContext:
         else:
             profiler = None
 
-
         # build trainer
         trainer = Trainer(
             # location
