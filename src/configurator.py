@@ -969,7 +969,7 @@ class RunContext:
             # computing devices
             accelerator =               self.accelerator,
             devices =                   self.devices,
-            strategy =                  strategy
+            strategy =                  strategy,
 
             # visualization and debugging
             fast_dev_run =              self.debug,
