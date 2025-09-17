@@ -1,12 +1,5 @@
+num_nodes: 2
 accelerator: gpu
 devices: 1    # also called world_size in case of distributed training
-num_nodes: 2
-distributed_training:
-  enabled: true
-  backend: nccl
-  master_address: localhost
-  master_port: 12345
-  world_size: 2
-  rank: 0
-  find_unused_parameters: true
-  broadcast_buffers: false
+strategy: ddp
+

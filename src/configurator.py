@@ -147,7 +147,7 @@ class RunContext:
         self.logger.info(f'Run id: {self.run_id}')
 
         # configuring platform. Distributed training only in training mode
-        self.distributed_training, self.accelerator, self.devices = get_platform(self.mode, cfg.platform)
+        self.num_nodes, self.accelerator, self.devices, self.strategy = get_platform(cfg.platform)
 
         # configuring datamodule
         self.logger.info(f'Configuring and loading datamodule...').push().add()
@@ -956,8 +956,6 @@ class RunContext:
         else:
             profiler = None
 
-        strategy = 'ddp' if self.distributed_training is not None or self.devices > 1 else 'auto'
-        num_nodes = self.distributed_training['num_nodes'] if self.distributed_training is not None else 1
 
         # build trainer
         trainer = Trainer(
@@ -970,8 +968,8 @@ class RunContext:
             # computing devices
             accelerator =               self.accelerator,
             devices =                   self.devices,
-            num_nodes=                  num_nodes,
-            strategy =                  strategy,
+            num_nodes=                  self.num_nodes,
+            strategy =                  self.strategy,
 
             # visualization and debugging
             fast_dev_run =              self.debug,
@@ -1070,12 +1068,18 @@ def gpus_available(platform_config):
     return torch.cuda.is_available() and platform_config['devices'] > 0
 
 
-def get_platform(mode, platform_config):
+def get_platform(platform_config):
+    # on default, use 1 num_nodes
+    if hasattr(platform_config, 'num_nodes'):
+        num_nodes = platform_config.num_nodes
+    else:
+        num_nodes = 1
+
     # on default, use cpu
     if hasattr(platform_config, 'accelerator'):
-        acc = platform_config.accelerator
+        accelerator = platform_config.accelerator
     else:
-        acc = 'cpu'
+        accelerator = 'cpu'
 
     # on default, use 1 device
     if hasattr(platform_config, 'devices'):
@@ -1083,67 +1087,19 @@ def get_platform(mode, platform_config):
     else:
         devices = 1
 
+    # on default, use strategy ddp
+    if hasattr(platform_config, 'strategy'):
+        strategy = platform_config.strategy
+    else:
+        strategy = "auto"
+
     # if mps or cpu is selected, select 1 device
-    if acc == 'mps' or acc == 'cpu':
+    if accelerator == 'mps' or accelerator == 'cpu':
         devices = 1
     
     # if gpu is selected, check if it is available
-    if acc == 'gpu' and not gpus_available(platform_config):
-        acc = 'cpu'
-        devices = 1
+    if accelerator == 'gpu' and not gpus_available(platform_config):
+        accelerator = 'cpu'
+        devices = 1    
 
-    # if distributed training is specified, override acc and devices
-    # NOTE: distributed training is only supported on gpu and during training
-    distributed_training = dict()
-    if  hasattr(platform_config, 'num_nodes') and \
-        platform_config.num_nodes > 1 and \
-        "train" in mode and \
-        hasattr(platform_config, 'distributed_training') and \
-        hasattr(platform_config.distributed_training, 'enabled') and \
-        platform_config.distributed_training.enabled:
-
-        distributed_training['num_nodes'] = platform_config.num_nodes
-
-        # if accelerator is not gpu, raise an error
-        if acc != 'gpu':
-            raise ContextException(f'Distributed training is only supported on GPU, found {acc} instead')
-
-        # checking all the following parameters are present
-        if hasattr(platform_config.distributed_training, 'backend'):
-            distributed_training['backend'] = platform_config.distributed_training.backend
-        else:
-            distributed_training['backend'] = 'nccl'
-
-        if hasattr(platform_config.distributed_training, 'master_address'):
-            distributed_training['master_address'] = platform_config.distributed_training.master_address
-        else:
-            raise ContextException(f'Distributed training requires master_address to be specified')
-
-        if hasattr(platform_config.distributed_training, 'master_port'):
-            distributed_training['master_port'] = platform_config.distributed_training.master_port
-        else:
-            raise ContextException(f'Distributed training requires master_port to be specified')
-
-        if hasattr(platform_config.distributed_training, 'world_size'):
-            distributed_training['world_size'] = platform_config.distributed_training.world_size
-        else:
-            raise ContextException(f'Distributed training requires world_size to be specified')
-
-        if hasattr(platform_config.distributed_training, 'rank'):
-            distributed_training['rank'] = platform_config.distributed_training.rank
-        else:
-            raise ContextException(f'Distributed training requires rank to be specified')
-
-        if hasattr(platform_config.distributed_training, 'find_unused_parameters'):
-            distributed_training['find_unused_parameters'] = platform_config.distributed_training.find_unused_parameters
-        else:
-            distributed_training['find_unused_parameters'] = True
-
-        if hasattr(platform_config.distributed_training, 'broadcast_buffers'):
-            distributed_training['broadcast_buffers'] = platform_config.distributed_training.broadcast_buffers
-        else:
-            distributed_training['broadcast_buffers'] = False
-    else:
-        distributed_training = None
-
-    return distributed_training, acc, devices
+    return num_nodes, accelerator, devices, strategy
