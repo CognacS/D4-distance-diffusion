@@ -957,6 +957,7 @@ class RunContext:
             profiler = None
 
         strategy = 'ddp' if self.distributed_training is not None or self.devices > 1 else 'auto'
+        num_nodes = self.distributed_training['num_nodes'] if self.distributed_training is not None else 1
 
         # build trainer
         trainer = Trainer(
@@ -969,6 +970,7 @@ class RunContext:
             # computing devices
             accelerator =               self.accelerator,
             devices =                   self.devices,
+            num_nodes=                  num_nodes, 
             strategy =                  strategy,
 
             # visualization and debugging
@@ -1093,10 +1095,14 @@ def get_platform(mode, platform_config):
     # if distributed training is specified, override acc and devices
     # NOTE: distributed training is only supported on gpu and during training
     distributed_training = dict()
-    if "train" in mode and \
+    if  hasattr(platform_config, 'num_nodes') and \
+        platform_config.num_nodes > 1 and \
+        "train" in mode and \
         hasattr(platform_config, 'distributed_training') and \
         hasattr(platform_config.distributed_training, 'enabled') and \
         platform_config.distributed_training.enabled:
+
+        distributed_training['num_nodes'] = platform_config.num_nodes
 
         # if accelerator is not gpu, raise an error
         if acc != 'gpu':
@@ -1137,5 +1143,7 @@ def get_platform(mode, platform_config):
             distributed_training['broadcast_buffers'] = platform_config.distributed_training.broadcast_buffers
         else:
             distributed_training['broadcast_buffers'] = False
+    else:
+        distributed_training = None
 
-    return distributed_training if len(distributed_training) > 0 else None, acc, devices
+    return distributed_training, acc, devices
