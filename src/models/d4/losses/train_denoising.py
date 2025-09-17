@@ -11,6 +11,7 @@ from torch import Tensor
 import torch.nn as nn
 
 import src.models.d4.labels as labels
+from src.models.d4.geometry import get_ignored_eigenvalues
 
 import torch.nn.functional as F
 
@@ -178,6 +179,7 @@ class TrainLossDistance(nn.Module):
             lambda_train_E: float = 1.,
             lambda_train_C: float = 1.,
             lambda_train_D: float = 1.,
+            lambda_eigenvalues_regularization: float = 0.,
             **kwargs
         ):
         super().__init__()
@@ -185,6 +187,7 @@ class TrainLossDistance(nn.Module):
         self.lambda_train_E = lambda_train_E
         self.lambda_train_C = lambda_train_C
         self.lambda_train_D = lambda_train_D
+        self.lambda_eigenvalues_regularization = lambda_eigenvalues_regularization
 
     def forward(
             self,
@@ -202,7 +205,7 @@ class TrainLossDistance(nn.Module):
         true_y : tensor -- (bs, )
         log : boolean. """
 
-        pred_x, pred_e, pred_dist, pred_c, nodes_mask, triang_edge_mask = pred_values
+        pred_x, pred_e, pred_dist, pred_c, nodes_mask, triang_edge_mask, full_edge_dist = pred_values
         true_x, true_e, true_dist, true_c = true_values
 
         # compute cross entropy loss
@@ -219,6 +222,14 @@ class TrainLossDistance(nn.Module):
             self.lambda_train_E * loss_e.mean(),
             self.lambda_train_D * loss_dist.mean()
         ])
+        
+        if self.lambda_eigenvalues_regularization > 0:
+            edge_mask = nodes_mask.unsqueeze(1) * nodes_mask.unsqueeze(2)
+            ignored_eigenvalues = get_ignored_eigenvalues(full_edge_dist, n_components=3, edge_mask=edge_mask) # (B, N-3)
+            # all the ignored eigenvalues should be close to zero
+            loss_eigenvalues = F.mse_loss(ignored_eigenvalues, torch.zeros_like(ignored_eigenvalues), reduction=reduction)
+            total_loss = total_loss + self.lambda_eigenvalues_regularization * loss_eigenvalues.mean()
+
 
         if ret_log:
             to_log = {
@@ -228,6 +239,8 @@ class TrainLossDistance(nn.Module):
                 labels.DENOISE_MSE_DIST: loss_dist.detach(),
                 labels.DENOISE_TOTAL: total_loss.detach()
             }
+            if self.lambda_eigenvalues_regularization > 0:
+                to_log['denoise_eigenvals_reg'] = loss_eigenvalues.detach()
             return total_loss, to_log
         else:
             return total_loss

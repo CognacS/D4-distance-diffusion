@@ -1,0 +1,5 @@
+EMAModelCheckpoint:
+    save_last: true
+    every_n_epochs: 1
+    monitor: 'valid_denoising/denoise_total'
+    mode: min

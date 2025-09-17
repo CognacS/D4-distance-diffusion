@@ -25,18 +25,20 @@ def compute_gramm_matrix(edge_dist: torch.Tensor, edge_mask: Optional[torch.Tens
     return B
 
 
-def get_ignored_eigenvalues(edge_dist: torch.Tensor, n_components: int) -> torch.Tensor:
+def get_ignored_eigenvalues(edge_dist: torch.Tensor, n_components: int = 3, edge_mask: Optional[torch.Tensor]=None) -> torch.Tensor:
     """
     Get the eigenvalues that are ignored in MDS.
     :param edge_dist: Tensor of shape (n, n) containing pairwise distances.
     :param n_components: Number of dimensions to reduce to.
     :return: Tensor of ignored eigenvalues.
     """
-    B = compute_gramm_matrix(edge_dist)
-    eigvals, _ = torch.linalg.eigh(B)
+    if edge_mask is not None:
+        edge_dist = edge_dist * edge_mask
+    B = compute_gramm_matrix(edge_dist, edge_mask)
+    eigvals = torch.linalg.eigvalsh(B.to(torch.float64))
     
     # Sort eigenvalues in descending order and ignore the last n_components
-    return torch.sort(eigvals, descending=True).values[n_components:]
+    return eigvals[..., :-n_components]
 
 
 def mds(edge_dist: torch.Tensor, n_components: int = 3, edge_mask: Optional[torch.Tensor]=None) -> torch.Tensor:
@@ -49,6 +51,7 @@ def mds(edge_dist: torch.Tensor, n_components: int = 3, edge_mask: Optional[torc
     if edge_mask is not None:
         edge_dist = edge_dist * edge_mask
     B = compute_gramm_matrix(edge_dist, edge_mask)
+    # with eigh, eigenvalues are already in ascending order
     eigvals, eigvecs = torch.linalg.eigh(B.to(torch.float64))
     
     eigvals_nd = eigvals.flip(dims=(-1,))[..., :n_components]  # Sort eigenvalues in descending order

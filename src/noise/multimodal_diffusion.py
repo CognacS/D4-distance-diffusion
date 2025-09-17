@@ -301,7 +301,7 @@ class StructuredMultimodalDiffusionProcess(MultimodalDiffusionProcess, ABC):
                 kwargs_per_data,
                 **kwargs
             ),
-            current_datapoint
+            original_datapoint
         )
     
 
@@ -342,22 +342,22 @@ class ChainedNoiseProcess(NoiseProcess):
      
     
     def sample_next(self, current_datapoint, t, **kwargs):
-        current_datapoint = self.noise_process_before.sample_noise_next(current_datapoint, t, **kwargs)
+        current_datapoint = self.noise_process_before.sample_next(current_datapoint, t, **kwargs)
         if self.chain_sample_next is not None:
             current_datapoint = self.chain_sample_next(current_datapoint, t, **kwargs)
-        next_datapoint = self.noise_process_after.sample_noise_next(current_datapoint, t, **kwargs)
+        next_datapoint = self.noise_process_after.sample_next(current_datapoint, t, **kwargs)
         return next_datapoint
     
     def sample_from_original(self, original_datapoint, t, **kwargs):
-        original_datapoint = self.noise_process_before.sample_noise_from_original(original_datapoint, t, **kwargs)
+        original_datapoint = self.noise_process_before.sample_from_original(original_datapoint, t, **kwargs)
         if self.chain_sample_from_original is not None:
             original_datapoint = self.chain_sample_from_original(original_datapoint, t, **kwargs)
-        step_t_datapoint = self.noise_process_after.sample_noise_from_original(original_datapoint, t, **kwargs)
+        step_t_datapoint = self.noise_process_after.sample_from_original(original_datapoint, t, **kwargs)
         return step_t_datapoint
     
     def sample_posterior(self, original_datapoint, current_datapoint, t, **kwargs):
-        original_datapoint = self.noise_process_before.sample_noise_from_original(original_datapoint, t, **kwargs)
+        original_datapoint = self.noise_process_before.sample_posterior(original_datapoint, current_datapoint, t, **kwargs)
         if self.chain_sample_posterior is not None:
             original_datapoint = self.chain_sample_posterior(original_datapoint, t, **kwargs)
-        prev_datapoint = self.noise_process_after.sample_noise_posterior(original_datapoint, current_datapoint, t, **kwargs)
+        prev_datapoint = self.noise_process_after.sample_posterior(original_datapoint, current_datapoint, t, **kwargs)
         return prev_datapoint

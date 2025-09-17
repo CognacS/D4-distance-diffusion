@@ -65,10 +65,8 @@ from src.models.utils.diffusion import (
     append_time_to_graph_globals,
     change_time_in_graph_globals
 )
-from src.noise.graph_diffusion import (
-    MarginalGraphDiffusionProcess,
-    GraphDiffusionProcess
-)
+from src.noise.graph_diffusion import GraphDiffusionProcess
+from src.noise.multimodal_diffusion import ChainedNoiseProcess
 
 from src.noise.discrete_diffusion import DiscreteDiffusionProcess
 from src.noise.graph_diffusion import GraphDiffusionProcess
@@ -164,7 +162,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             'edge_adjmat': dataset_info['num_cls_edges'],
             'node_charges': dataset_info['num_cls_charges'],
             'y': 0 if discard_conditioning else dataset_info['dim_targets'],
-            "edge_dist": 1
+            "edge_dist": 1 if self.distance_output_mode == 'single' else dataset_info['num_cls_edges']+1
         }
 
         self.data_dims['edge_adjmat'] += 1  # account for no-edge class
@@ -232,9 +230,37 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             "Diffusion processes for x, edge_adjmat, edge_dist, node_charges must be specified in D4Model"
         # build the graph diffusion process
         # this computes all processes at the same time in a single call
-        self.diffusion_process = GraphDiffusionProcess(
-            diffusion_procs_per_data=diffusion_procs_per_data,
-        )   
+        
+        if self.distance_output_mode == 'single':
+            # here there is no internal conditioning, then aggregate all processes together
+            self.diffusion_process = GraphDiffusionProcess(
+                diffusion_procs_per_data=diffusion_procs_per_data,
+            )
+        else:
+            # here first the structure is compute, then the distances conditioned on the structure
+            diffusion_struct = {k: diffusion_procs_per_data[k] for k in ['x', 'edge_adjmat', 'node_charges']}
+            diffusion_dist = {'edge_dist': diffusion_procs_per_data['edge_dist']}
+            
+            # the samples are combined by just adding the distances
+            def combine_stationary(x_before, x_after, *args, **kwargs):
+                x_before.edge_dist = x_after.edge_dist
+                return x_before
+
+            # after sampling the structure, distances are sampled conditioned on the structure
+            def chain_sample_posterior(datapoint, *args, **kwargs):
+                datapoint.edge_dist = self.postprocess_distances(
+                    datapoint.edge_dist, datapoint.edge_adjmat, datapoint.edge_mask
+                )
+                
+                return datapoint
+            
+            # chain the two processes one after the other
+            self.diffusion_process = ChainedNoiseProcess(
+                noise_process_before = GraphDiffusionProcess(diffusion_struct, undirected=True),
+                noise_process_after = GraphDiffusionProcess(diffusion_dist, undirected=True),
+                combine_stationary = combine_stationary,
+                chain_sample_posterior = chain_sample_posterior
+            )
 
 
         ######################  BUILD LOSSES AND METRICS  ######################
@@ -319,7 +345,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         return out_dist
         
         
-    def postprocess_distances(self, edge_dist: Tensor, edge_adjmat: Tensor) -> None:
+    def postprocess_distances(self, edge_dist: Tensor, edge_adjmat: Tensor, edge_mask: BoolTensor) -> None:
         
         if self.distance_output_mode == 'periscopic':
             edge_dist = self.aggregate_periscopic_distances(edge_dist, edge_adjmat)
@@ -330,6 +356,8 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         # silu such that: 0 is reachable (with softplus it is only asymptotically)
         # and negative distances are unlikely
         edge_dist = torch.nn.functional.silu(edge_dist)
+        # mask distances
+        edge_dist = edge_dist * edge_mask.float()
         
         return edge_dist
 
@@ -430,7 +458,8 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         # make the training noisy
         gen_batch_dense.edge_dist = self.postprocess_distances(
             gen_batch_dense.edge_dist,
-            batch_to_generate_dense.edge_adjmat
+            batch_to_generate_dense.edge_adjmat,
+            batch_to_generate_dense.edge_mask
         )
 
         pred_x = gen_batch_dense.x[node_mask]
@@ -441,7 +470,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         ###########################  FINAL PACKING  ############################
 
         true_values = [true_x, true_e, true_dist, true_c]
-        pred_values = [pred_x, pred_e, pred_dist, pred_c, node_mask, triang_edge_mask]
+        pred_values = [pred_x, pred_e, pred_dist, pred_c, node_mask, triang_edge_mask, gen_batch_dense.edge_dist]
         
         return true_values, pred_values
     

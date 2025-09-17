@@ -5,22 +5,16 @@ defaults:
  - override /logger: wandb
  - override /method: d4
  - override /method/trainer: molecular_trainer
- - override /method/dataloader: [base_dataloader, batch_1024, workers_8]
- - override /method/callbacks: ckpt_orig_d4
+ - override /method/dataloader: [base_dataloader, batch_2048, workers_8]
+ - override /method/callbacks: ckpt_ema_dist
 
 method:
     model:
         params:
-            generation:
-                batch_size: 1024
-            validation:
-                how_many_to_generate: 1024
-
             embed_time: true
             features:
                 - indegree
                 - nodes_num
-                - spectral
             denoising:
                 loss:
                     lambda_train_X: 1.0
@@ -29,6 +23,7 @@ method:
                     lambda_train_D: 1.0
     trainer:
         log_every_n_steps: 400
+        check_val_every_n_epoch: 10
         #gradient_clip_val: 1.0
     
     callbacks:
@@ -41,7 +36,7 @@ logger:
         project: d4-generation
         group: qm9-d4
 
-config_name: qm9-d4
+config_name: qm9-d4-best
 
 
 mode: train+eval
