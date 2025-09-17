@@ -1,5 +1,6 @@
 accelerator: gpu
 devices: 1    # also called world_size in case of distributed training
+num_nodes: 1
 distributed_training:
   enabled: true
   backend: nccl
