@@ -146,8 +146,8 @@ class RunContext:
         self.logger.info(f'Run version: {self.version}')
         self.logger.info(f'Run id: {self.run_id}')
 
-        # configuring platform
-        self.accelerator, self.devices = get_accel_devices(cfg.platform)
+        # configuring platform. Distributed training only in training mode
+        self.distributed_training, self.accelerator, self.devices = get_platform(self.mode, cfg.platform)
 
         # configuring datamodule
         self.logger.info(f'Configuring and loading datamodule...').push().add()
@@ -170,9 +170,9 @@ class RunContext:
         # configuring model
         self.logger.info(f'Configuring and loading model...').push().add()
         self.model = self._configure_model(
-            cfg_model =         cfg.method.model,
-            dataset_info =      self.dataset_info,
-            test_assignment =   self.test_assignment
+            cfg_model =             cfg.method.model,
+            dataset_info =          self.dataset_info,
+            test_assignment =       self.test_assignment,
         )
         self.logger.pop().info(f'Model configured with success')
 
@@ -187,9 +187,9 @@ class RunContext:
         # configuring trainer
         self.logger.info(f'Configuring trainer...').push().add()
         self.trainer = self._configure_trainer(
-            cfg_trainer =       cfg.method.trainer,
-            cfg_callbacks =     cfg.method.callbacks,
-            cfg_logger =        cfg.logger
+            cfg_trainer =           cfg.method.trainer,
+            cfg_callbacks =         cfg.method.callbacks,
+            cfg_logger =            cfg.logger,
         )
         self.logger.pop().info(f'Trainer configured with success')
 
@@ -698,7 +698,7 @@ class RunContext:
             cfg_dataset: DictConfig,
             cfg_dataloader: DictConfig,
             cfg_pretf: DictConfig,
-            cfg_dswrapper: DictConfig
+            cfg_dswrapper: DictConfig,
         ) -> GraphDataModule:
 
         ###########################  DATASET SETUP  ############################
@@ -809,7 +809,7 @@ class RunContext:
             self,
             cfg_model: DictConfig,
             dataset_info: Dict,
-            test_assignment: Assignment
+            test_assignment: Assignment,
         ):
 
 
@@ -834,6 +834,9 @@ class RunContext:
                     self.logger.warning(f'Could not compile the model, cause: {e}')
             else:
                 self.logger.warning(f'MPS is enabled, model will not be compiled as it is not supported')
+
+        # if distributed_training is not None:
+        #     model = torch.nn.parallel.DistributedDataParallel(model, **distributed_training)
 
         return model
 
@@ -918,7 +921,7 @@ class RunContext:
             self,
             cfg_trainer: DictConfig,
             cfg_callbacks: DictConfig,
-            cfg_logger: DictConfig
+            cfg_logger: DictConfig,
         ) -> Trainer:
 
         callbacks = []
@@ -952,7 +955,9 @@ class RunContext:
             profiler = AdvancedProfiler(dirpath=".", filename="perf_logs")
         else:
             profiler = None
-        
+
+        strategy = 'ddp' if self.distributed_training is not None or self.devices > 1 else 'auto'
+
         # build trainer
         trainer = Trainer(
             # location
@@ -964,7 +969,7 @@ class RunContext:
             # computing devices
             accelerator =               self.accelerator,
             devices =                   self.devices,
-            strategy =                  'ddp'       if self.devices > 1 else 'auto',
+            strategy =                  strategy
 
             # visualization and debugging
             fast_dev_run =              self.debug,
@@ -1063,20 +1068,74 @@ def gpus_available(platform_config):
     return torch.cuda.is_available() and platform_config['devices'] > 0
 
 
-def get_accel_devices(platform_config):
+def get_platform(mode, platform_config):
     # on default, use cpu
-    if not hasattr(platform_config, 'accelerator'):
-        return 'cpu', 1
-    
-    # get device
-    acc = platform_config.accelerator
+    if hasattr(platform_config, 'accelerator'):
+        acc = platform_config.accelerator
+    else:
+        acc = 'cpu'
 
+    # on default, use 1 device
+    if hasattr(platform_config, 'devices'):
+        devices = platform_config.devices
+    else:
+        devices = 1
+
+    # if mps or cpu is selected, select 1 device
+    if acc == 'mps' or acc == 'cpu':
+        devices = 1
+    
     # if gpu is selected, check if it is available
     if acc == 'gpu' and not gpus_available(platform_config):
-        return 'cpu', 1 # if not, use cpu
-    
-    # if mps or cpu is selected, return it with 1 device
-    if acc == 'mps' or acc == 'cpu':
-        return acc, 1
+        acc = 'cpu'
+        devices = 1
 
-    return acc, platform_config.devices
+    # if distributed training is specified, override acc and devices
+    # NOTE: distributed training is only supported on gpu and during training
+    distributed_training = dict()
+    if "train" in mode and \
+        hasattr(platform_config, 'distributed_training') and \
+        hasattr(platform_config.distributed_training, 'enabled') and \
+        platform_config.distributed_training.enabled:
+
+        # if accelerator is not gpu, raise an error
+        if acc != 'gpu':
+            raise ContextException(f'Distributed training is only supported on GPU, found {acc} instead')
+
+        # checking all the following parameters are present
+        if hasattr(platform_config.distributed_training, 'backend'):
+            distributed_training['backend'] = platform_config.distributed_training.backend
+        else:
+            distributed_training['backend'] = 'nccl'
+
+        if hasattr(platform_config.distributed_training, 'master_address'):
+            distributed_training['master_address'] = platform_config.distributed_training.master_address
+        else:
+            raise ContextException(f'Distributed training requires master_address to be specified')
+
+        if hasattr(platform_config.distributed_training, 'master_port'):
+            distributed_training['master_port'] = platform_config.distributed_training.master_port
+        else:
+            raise ContextException(f'Distributed training requires master_port to be specified')
+
+        if hasattr(platform_config.distributed_training, 'world_size'):
+            distributed_training['world_size'] = platform_config.distributed_training.world_size
+        else:
+            raise ContextException(f'Distributed training requires world_size to be specified')
+
+        if hasattr(platform_config.distributed_training, 'rank'):
+            distributed_training['rank'] = platform_config.distributed_training.rank
+        else:
+            raise ContextException(f'Distributed training requires rank to be specified')
+
+        if hasattr(platform_config.distributed_training, 'find_unused_parameters'):
+            distributed_training['find_unused_parameters'] = platform_config.distributed_training.find_unused_parameters
+        else:
+            distributed_training['find_unused_parameters'] = True
+
+        if hasattr(platform_config.distributed_training, 'broadcast_buffers'):
+            distributed_training['broadcast_buffers'] = platform_config.distributed_training.broadcast_buffers
+        else:
+            distributed_training['broadcast_buffers'] = False
+
+    return distributed_training if len(distributed_training) > 0 else None, acc, devices

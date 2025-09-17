@@ -2,6 +2,7 @@
 defaults:
  - override /task: qm9_3d
  - override /logger: wandb
+ - override /platform: distributed_1gpu
  - override /method: dummy
  - override /method/trainer: molecular_trainer
  - override /method/dataloader: [single_graph]
