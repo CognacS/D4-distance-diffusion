@@ -162,7 +162,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             'edge_adjmat': dataset_info['num_cls_edges'],
             'node_charges': dataset_info['num_cls_charges'],
             'y': 0 if discard_conditioning else dataset_info['dim_targets'],
-            "edge_dist": 1 if self.distance_output_mode == 'single' else dataset_info['num_cls_edges']+1
+            "edge_dist": 1
         }
 
         self.data_dims['edge_adjmat'] += 1  # account for no-edge class
@@ -180,6 +180,10 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             'y': self.time_enc_dim if self.using_pos_emb() else 1
             # account for diffusion time as a global y feature
         })
+        
+        self.out_dims = deepcopy(self.data_dims)
+        if not self.distance_output_mode == 'single':
+            self.out_dims['edge_dist'] = self.data_dims['edge_adjmat']
 
         self.console_logger.info(f'{self.__class__.__name__} dimensions:')
         self.console_logger.info(f"Size of input features: {self.augmented_dims}")
@@ -197,7 +201,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         self.denoising_model = reg_architectures.get_instance_from_cfg(
             config =        self.denoising_config.architecture,
             input_dims =    self.augmented_dims,
-            output_dims =   self.data_dims,
+            output_dims =   self.out_dims,
         )
 
         ######################  BUILD DIFFUSION PROCESS  #######################
@@ -323,7 +327,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         out_dist = (edge_dist * gt_types_mask).detach().sum(dim=-1)
         
         # add true type distance with gradient
-        out_dist = out_dist + edge_dist[edge_adjmat]
+        out_dist = out_dist + torch.gather(edge_dist, -1, edge_adjmat.unsqueeze(-1)).squeeze(-1)
         
         return out_dist
         
@@ -416,14 +420,14 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             
         ##################  UPDATE MARGINAL PROCESS IF NEEDED  #################
         
-        true_data = {'x': true_x, 'edge_adjmat': true_e, 'node_charges': true_c}
-        for data in ['x', 'edge_adjmat', 'node_charges']:
+        # true_data = {'x': true_x, 'edge_adjmat': true_e, 'node_charges': true_c}
+        # for data in ['x', 'edge_adjmat', 'node_charges']:
             
-            process = self.diffusion_process.diffusion_procs_per_data[data]
-            true_d = true_data[data]
+        #     process = self.diffusion_process.diffusion_procs_per_data[data]
+        #     true_d = true_data[data]
 
-            if hasattr(process, 'update'):
-                process.update(labels=true_d)
+        #     if hasattr(process, 'update'):
+        #         process.update(labels=true_d)
 
         #######################  APPLY GRAPH DIFFUSION  ########################
         # sample the timesteps for the diffusion process
@@ -522,12 +526,12 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
     def on_train_epoch_end(self) -> None:
         """"Recall that this method is called AFTER the validation epoch, if there is any!"""
             
-        for data in ['x', 'edge_adjmat', 'node_charges']:
-            # stop updating marginals at the end of the first training epoch
-            process = self.diffusion_process.diffusion_procs_per_data[data]
+        # for data in ['x', 'edge_adjmat', 'node_charges']:
+        #     # stop updating marginals at the end of the first training epoch
+        #     process = self.diffusion_process.diffusion_procs_per_data[data]
 
-            if hasattr(process, 'update'):
-                process.stop_updating()
+        #     if hasattr(process, 'update'):
+        #         process.stop_updating()
         
         denoise_logs = self.apply_prefix(
             metrics = self.metrics[KEY_TRAIN],

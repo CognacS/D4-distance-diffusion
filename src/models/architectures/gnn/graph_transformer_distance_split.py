@@ -603,7 +603,8 @@ class GraphTransformerDistanceOriginal(nn.Module):
         #E = (E + torch.transpose(E, 1, 2))
         
         #D = D * triang_mask.squeeze(-1)
-        D = D * diag_mask.squeeze(-1)
+        sq_diag_mask = diag_mask.squeeze(-1) if D.ndim == 3 else diag_mask
+        D = D * sq_diag_mask
         D = (D + D.transpose(1, 2)) / 2
         #D = D + torch.transpose(D, 1, 2)
         
