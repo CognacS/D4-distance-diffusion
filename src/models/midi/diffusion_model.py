@@ -375,8 +375,8 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         # print(f"Test ends.")
         # MiDi evaluation is replaced with the framework one
         self.on_evaluation_epoch_end(which='test')
-        
-        
+    
+    @pl.utilities.rank_zero.rank_zero_only
     def on_evaluation_epoch_end(self, which='valid'):
         if which == 'valid':
             assignment = self.valid_assignment
