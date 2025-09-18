@@ -220,9 +220,9 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         tm_log_dict = self.train_metrics(masked_pred=pred, masked_true=dense_data,
                                          log=i % self.log_every_steps == 0)
         if tl_log_dict is not None:
-            self.log_dict(tl_log_dict, batch_size=self.BS)
+            self.log_dict(tl_log_dict, batch_size=self.BS, sync_dist=True)
         if tm_log_dict is not None:
-            self.log_dict(tm_log_dict, batch_size=self.BS)
+            self.log_dict(tm_log_dict, batch_size=self.BS, sync_dist=True)
         return loss
 
     def on_validation_epoch_start(self) -> None:
@@ -376,7 +376,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         # MiDi evaluation is replaced with the framework one
         self.on_evaluation_epoch_end(which='test')
         
-        
+    @pl.utilities.rank_zero.rank_zero_only
     def on_evaluation_epoch_end(self, which='valid'):
         if which == 'valid':
             assignment = self.valid_assignment
@@ -743,11 +743,11 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
                    f" charges: {tle_log['train_epoch/charges_CE']:.2f} --"
                    f" E: {tle_log['train_epoch/E_CE'] :.2f} --"
                    f" y: {tle_log['train_epoch/y_CE'] :.2f} -- {time.time() - self.start_epoch_time:.1f}s ")
-        self.log_dict(tle_log, batch_size=self.BS)
+        self.log_dict(tle_log, batch_size=self.BS, sync_dist=True)
         # if self.local_rank == 0:
         tme_log = self.train_metrics.log_epoch_metrics(self.current_epoch, self.local_rank)
         if tme_log is not None:
-            self.log_dict(tme_log, batch_size=self.BS)
+            self.log_dict(tme_log, batch_size=self.BS, sync_dist=True)
         # if wandb.run:
         #     wandb.log({"epoch": self.current_epoch}, commit=False)
 

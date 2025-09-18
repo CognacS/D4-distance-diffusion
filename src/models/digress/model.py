@@ -15,6 +15,7 @@ from logging import Logger
 import torch
 from torch import Tensor, IntTensor
 import torch.nn as nn
+import pytorch_lightning as pl
 
 from torch_geometric.utils import to_dense_batch
 
@@ -466,7 +467,7 @@ class DiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             metrics = self.metrics[KEY_TRAIN],
             prefix = f'train_denoising'
         )
-        self.log_dict(denoise_logs)
+        self.log_dict(denoise_logs, sync_dist=True)
 
         self.total_elapsed_time += time.time() - self.start_time
         self.max_memory_reserved = max(torch.cuda.max_memory_reserved(0), self.max_memory_reserved)
@@ -509,7 +510,7 @@ class DiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             prefix = f'train_denoising'
         )
 
-        self.log_dict(logs)
+        self.log_dict(logs, sync_dist=True)
 
         return {'loss': denoise_loss}
 
@@ -602,6 +603,7 @@ class DiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         return {'loss': denoise_loss}
 
 
+    @pl.utilities.rank_zero.rank_zero_only
     @torch.no_grad()
     def on_evaluation_epoch_end(self, which=KEY_VALID) -> None:
 
