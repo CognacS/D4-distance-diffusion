@@ -35,6 +35,7 @@ torch._dynamo.config.suppress_errors = True
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.profilers import AdvancedProfiler
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 
 # datamodule utilities
@@ -1015,11 +1016,6 @@ class RunContext:
     
 
     def initialize_logger(self, name: str,  level: Union[str, int] = None) -> logging.Logger:
-
-        level = level if level is not None else logging.INFO
-        if isinstance(level, str) and not level.isupper():
-            level = level.upper()
-
         logger = logging.getLogger(name)
         handler = logging.StreamHandler()
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -1028,8 +1024,15 @@ class RunContext:
         # remove all handlers
         logger.handlers = []
         logger.addHandler(handler)
-        logger.setLevel(level)
 
+        if rank_zero_only.rank == 0:
+            level = level if level is not None else logging.INFO
+            if isinstance(level, str) and not level.isupper():
+                level = level.upper()
+        else:
+            level = logging.CRITICAL + 1  # effectively disable logging for non-zero ranks
+
+        logger.setLevel(level)
         logger = IndentedLoggerAdapter(logger)
 
         return logger
