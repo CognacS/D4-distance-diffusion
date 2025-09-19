@@ -384,7 +384,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
     def postprocess_distances(self, edge_dist: Tensor, edge_adjmat: Tensor, edge_mask: BoolTensor) -> None:
         
         if self.distance_output_mode == 'periscopic':
-            edge_dist = self.aggregate_periscopic_distances(edge_dist, edge_adjmat)
+            edge_dist = self.aggregate_periscopic_distances_alt(edge_dist, edge_adjmat)
         elif self.distance_output_mode == 'conditional':
             edge_dist = self.aggregate_conditional_distances(edge_dist, edge_adjmat)
         
