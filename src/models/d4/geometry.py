@@ -57,6 +57,9 @@ def mds(edge_dist: torch.Tensor, n_components: int = 3, edge_mask: Optional[torc
     eigvals_nd = eigvals.flip(dims=(-1,))[..., :n_components]  # Sort eigenvalues in descending order
     eigvecs_nd = eigvecs.flip(dims=(-1,))[..., :n_components]  # Corresponding eigenvectors
     
+    # fix numerical issues: set negative eigenvalues to zero
+    eigvals_nd = torch.clamp(eigvals_nd, min=1e-8)
+    
     ret = eigvecs_nd * torch.sqrt(eigvals_nd).unsqueeze(-2)
     
     return ret.to(edge_dist.dtype)  # Scale by the square root of eigenvalues

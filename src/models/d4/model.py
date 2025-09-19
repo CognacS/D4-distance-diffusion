@@ -154,6 +154,8 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         self.distance_output_mode = self.denoising_config.get('distance_output_mode', 'single')
         assert self.distance_output_mode in ['single', 'periscopic', 'conditional'], \
             "distance_output_mode must be one of 'single', 'periscopic', or 'conditional'"
+            
+        self.always_apply_mds = self.denoising_config.get('always_apply_mds', False)
 
         #######################  GRAPHS DIMENSIONS SETUP  ######################
         # setup model input and output dimensions (based on the dataset)
@@ -330,6 +332,36 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         out_dist = out_dist + torch.gather(edge_dist, -1, edge_adjmat.unsqueeze(-1)).squeeze(-1)
         
         return out_dist
+    
+    
+    def aggregate_periscopic_distances_alt(self, edge_dist: Tensor, edge_adjmat: Tensor) -> Tensor:
+        """Periscopic mode adds the distances depending on the edge types.
+        This is based on the assumption that, as the type increases, the distance decreases.
+        For example, if bonds are [0,1,2,3], where 0 is no-bond, then the distance decreases,
+        with the 3-bond being the shortest distance.
+        Changes to above version: gradient is NOT stopped for greater types.
+        
+        edge_dist: Tensor
+            shape (B,N,N,num_types)
+        edge_adjmat: Tensor
+            shape (B,N,N) or (B,N,N,num_types) in logits/onehot format
+        """
+        if edge_adjmat.ndim == 4:
+            # if edge_adjmat is in logits/onehot format, convert to indices
+            edge_adjmat = edge_adjmat.argmax(dim=-1)
+        
+        # gather greater types
+        # e.g., if type=1, gather types [2,3,...]
+        gt_types_mask = torch.arange(0, self.data_dims['edge_adjmat'], device=edge_adjmat.device).view(1,1,1,-1) # shape (1,1,1,num_types)
+        gt_types_mask = gt_types_mask > edge_adjmat.unsqueeze(-1) # shape (B,N,N,num_types)
+        
+        # sum greater types + detach gradient
+        out_dist = (edge_dist * gt_types_mask).sum(dim=-1)
+        
+        # add true type distance with gradient
+        out_dist = out_dist + torch.gather(edge_dist, -1, edge_adjmat.unsqueeze(-1)).squeeze(-1)
+        
+        return out_dist
         
         
     def aggregate_conditional_distances(self, edge_dist: Tensor, edge_adjmat: Tensor) -> Tensor:
@@ -359,9 +391,16 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         # apply non-linearity to distances:
         # silu such that: 0 is reachable (with softplus it is only asymptotically)
         # and negative distances are unlikely
-        edge_dist = torch.nn.functional.silu(edge_dist)
+        #edge_dist = torch.nn.functional.silu(edge_dist)
         # mask distances
-        edge_dist = edge_dist * edge_mask.float()
+        #edge_dist = edge_dist * edge_mask.float()
+        
+        if self.always_apply_mds:
+            computed_node_pos = mds(edge_dist.float(), edge_mask=edge_mask)
+            # recompute distances
+            edge_dist = torch.cdist(computed_node_pos, computed_node_pos)
+            
+            
         
         return edge_dist
 
@@ -752,6 +791,15 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         final_graph.x = torch.softmax(final_graph.x, dim=-1)
         final_graph.node_charges = torch.softmax(final_graph.node_charges, dim=-1)
         final_graph.edge_adjmat = torch.softmax(final_graph.edge_adjmat, dim=-1)
+        
+        # postprocess distances if needed (single case)
+        # in other cases, it is already inside sample_posterior
+        # if self.distance_output_mode == 'single':
+        #     final_graph.edge_dist = self.postprocess_distances(
+        #         final_graph.edge_dist,
+        #         final_graph.edge_adjmat,
+        #         final_graph.edge_mask
+        #     )
 
         # sample graph at step t-1 from posterior
         generated_graph = self.diffusion_process.sample_posterior(

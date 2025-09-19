@@ -76,8 +76,8 @@ class XEyTransformerLayer(nn.Module):
         self.dropoutD1 = Dropout(dropout)
         self.dropoutD2 = Dropout(dropout)
         self.dropoutD3 = Dropout(dropout)
-        self.linD2_bis = Linear(dim_ffD, 256)
-        self.linD3_bis = Linear(256, dim_ffD)
+        self.linD2_bis = Linear(dim_ffD, dim_ffD)
+        self.linD3_bis = Linear(dim_ffD, dim_ffD)
         self.dropout_dbis = Dropout(dropout)
         self.dropout_dtris = Dropout(dropout)
 
@@ -504,7 +504,8 @@ class GraphTransformerDistanceOriginal(nn.Module):
         self.mlp_out_D = nn.Sequential(
             nn.Linear(transf_inout_dims[DIM_D], encdec_hidden_dims[DIM_D]),
             self.act_fn(),
-            nn.Linear(encdec_hidden_dims[DIM_D], self.out_dim_d)
+            nn.Linear(encdec_hidden_dims[DIM_D], self.out_dim_d),
+            nn.SiLU()
         )
 
         if self.using_y:

@@ -29,7 +29,7 @@ method:
                     lambda_train_C: 1.0
                     lambda_train_E: 2.0
                     lambda_train_D: 1.0
-                    #lambda_eigenvalues_regularization: 1.0
+                    lambda_eigenvalues_regularization: 1.0
     trainer:
         log_every_n_steps: 400
         check_val_every_n_epoch: 10
