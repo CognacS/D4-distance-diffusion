@@ -376,7 +376,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             # if edge_adjmat is in logits/onehot format, convert to indices
             edge_adjmat = edge_adjmat.argmax(dim=-1)
         
-        out_dist = edge_dist[edge_adjmat]
+        out_dist = torch.gather(edge_dist, -1, edge_adjmat.unsqueeze(-1)).squeeze(-1)
         
         return out_dist
         
