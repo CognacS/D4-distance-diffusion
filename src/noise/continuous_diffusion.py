@@ -151,7 +151,7 @@ class VPGaussianDiffusionProcess(NoiseProcess):
         # compute the parameters for the posterior transition
         alpha_t = 1 - beta_t
         sigma_bar_t_1_sq = 1 - alpha_bar_t_1 ** 2
-        sigma_bar_t_sq = 1 - alpha_bar_t ** 2
+        sigma_bar_t_sq = torch.clip(1 - alpha_bar_t ** 2, min=1e-8)
 
         # compute auxiliary factors to be used
         sigma_bar_t_sq_ratio = sigma_bar_t_1_sq / sigma_bar_t_sq

@@ -61,19 +61,18 @@ class CosineDiffusionSchedule(NoiseSchedule):
         # compute betas (parameter next)
         betas, alphas_bar = cosine_beta_schedule_discrete(max_time, s=s, exponent=exponent)
         # clamp values as in the original paper
-        #betas = torch.clamp(torch.from_numpy(betas), min=0, max=0.999)
-        betas = torch.from_numpy(betas)
+        betas = torch.clamp(torch.from_numpy(betas), min=0, max=0.999)
         alphas_bar = torch.from_numpy(alphas_bar)
         self.register_buffer('betas', betas.float())
 
         # compute alpha = 1 - beta
-        #alphas = 1 - self.betas
+        alphas = 1 - self.betas
 
         # recompute alpha_bar (parameter time 0->t)
-        #log_alpha = torch.log(alphas)
-        #log_alpha_bar = torch.cumsum(log_alpha, dim=0)
-        #self.register_buffer('alphas_bar', torch.exp(log_alpha_bar))
-        self.register_buffer('alphas_bar', alphas_bar.float())
+        log_alpha = torch.log(alphas)
+        log_alpha_bar = torch.cumsum(log_alpha, dim=0)
+        self.register_buffer('alphas_bar', torch.exp(log_alpha_bar))
+        #self.register_buffer('alphas_bar', alphas_bar.float())
 
 
     def params_next(self, t: Tensor, **kwargs):
