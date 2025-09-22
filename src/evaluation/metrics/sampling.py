@@ -380,10 +380,10 @@ class ValidMoleculeMetric(BaseSamplingMetric):
                     if smiles != '' and smiles is not None:
                         valid_smiles.append(smiles)
                 except Chem.rdchem.AtomValenceException:
-                    print("Valence error in GetmolFrags")
+                    #print("Valence error in GetmolFrags")
                     all_smiles.append(None)
                 except Chem.rdchem.KekulizeException:
-                    print("Can't kekulize molecule")
+                    #print("Can't kekulize molecule")
                     all_smiles.append(None)
             else:
                 all_smiles.append(None)

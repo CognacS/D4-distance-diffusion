@@ -41,10 +41,12 @@ class XEyTransformerLayer(nn.Module):
     """
     def __init__(self, dx: int, de: int, dy: int, heads: int, dim_ffX: int = 2048, dd=128,
                  dim_ffE: int = 128, dim_ffy: int = 2048, dim_ffD: int = 128 ,dropout: float = 0.1,
-                 layer_norm_eps: float = 1e-5, device=None, dtype=None, last_layer=False) -> None:
+                 layer_norm_eps: float = 1e-5, device=None, dtype=None, last_layer=False,
+                 extended_D_ffn=True) -> None:
         kw = {'device': device, 'dtype': dtype}
         super().__init__()
 
+        self.extended_D_ffn = extended_D_ffn
         #self.self_attn = NodeEdgeBlock(dx, de, dy, n_head, last_layer=last_layer)
         #self.self_attn = XEySelfAttention(dx, de, dy, dd ,n_head)
         self.self_attn = GraphSelfAttention(dx, de, dy, dd, last_layer=last_layer, n_head=heads)
@@ -76,8 +78,9 @@ class XEyTransformerLayer(nn.Module):
         self.dropoutD1 = Dropout(dropout)
         self.dropoutD2 = Dropout(dropout)
         self.dropoutD3 = Dropout(dropout)
-        self.linD2_bis = Linear(dim_ffD, dim_ffD)
-        self.linD3_bis = Linear(dim_ffD, dim_ffD)
+        if self.extended_D_ffn:
+            self.linD2_bis = Linear(dim_ffD, dim_ffD)
+            self.linD3_bis = Linear(dim_ffD, dim_ffD)
         self.dropout_dbis = Dropout(dropout)
         self.dropout_dtris = Dropout(dropout)
 
@@ -136,14 +139,16 @@ class XEyTransformerLayer(nn.Module):
         E = self.normE2(E + ff_outputE)
         E = 0.5 * (E + torch.transpose(E, 1, 2))
 
-        D_1 = (((self.activation(self.linD1(D)))))
-        D_2 = (((self.activation(self.linD2_bis(D_1)))))
-        D_3 = (((self.activation(self.linD3_bis(D_2)))))
+        if self.extended_D_ffn:
+            D_1 = (((self.activation(self.linD1(D)))))
+            D_2 = (((self.activation(self.linD2_bis(D_1)))))
+            D_3 = (((self.activation(self.linD3_bis(D_2)))))
 
-        ff_outputD = self.linD2(D_3)
+            ff_outputD = self.linD2(D_3)
+        else:
 
-        #ff_outputD = self.linD2((self.dropoutD2(self.activation(self.linD1(D)))))
-        ff_outputD = (ff_outputD)
+            ff_outputD = self.linD2((self.dropoutD2(self.activation(self.linD1(D)))))
+            ff_outputD = self.dropoutD3(ff_outputD)
 
         D = self.normD2(D + ff_outputD)
         D = 0.5 * (D + torch.transpose(D,1,2))
@@ -385,6 +390,7 @@ class GraphTransformerDistanceOriginal(nn.Module):
             transf_ffn_dims: Dict,
             transf_hparams: Dict,
             distance_dim: int = 16,
+            encode_distances: bool = False,
             use_residuals_inout: bool = True,
             act_fn = 'silu',
             **kwargs
@@ -404,13 +410,18 @@ class GraphTransformerDistanceOriginal(nn.Module):
 
         self.num_layers = num_layers
         self.use_residuals_inout = use_residuals_inout
-        
-        #self.distance_enc = SinusoidalPosEmb(distance_dim, scale=100.0)
+        self.encode_distances = encode_distances
 
         self.in_dim_x = input_dims[DIM_X] + input_dims[DIM_C]
         self.in_dim_e = input_dims[DIM_E]
         self.in_dim_y = input_dims[DIM_Y]
-        self.in_dim_d = input_dims[DIM_D]
+        
+        
+        if self.encode_distances:
+            self.distance_enc = SinusoidalPosEmb(distance_dim, scale=100.0)
+            self.in_dim_d = distance_dim - 1 + input_dims[DIM_D]
+        else:
+            self.in_dim_d = input_dims[DIM_D] 
 
         self.encdec_hidden_dims = encdec_hidden_dims
         self.transf_inout_dims = transf_inout_dims
@@ -560,7 +571,15 @@ class GraphTransformerDistanceOriginal(nn.Module):
         ###########################  ENCODE INPUTS  ############################
         # special treatment for edges (to make it symmetric (shouldn't this already be?))
         X = self.mlp_in_X(torch.cat([X, C], dim=-1)) # concatenate nodes with charges
-        #D = self.mlp_in_D(self.distance_enc(D))
+        if self.encode_distances:
+            if D.ndim == 4:
+                others = D[..., 1:]
+                D = D[..., 0]
+            else:
+                others = None
+            D = self.distance_enc(D)
+            if others is not None:
+                D = torch.cat([D, others], dim=-1)
         if D.ndim == 3:
             D = D.unsqueeze(-1)
         D = self.mlp_in_D(D)
