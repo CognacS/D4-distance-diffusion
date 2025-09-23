@@ -2,11 +2,11 @@
 defaults:
  - override /task: qm9_3d
  - override /logger: wandb
- - override /platform: distributed_1gpu
+ - override /platform: local_1gpu
  - override /method: dummy
  - override /method/trainer: molecular_trainer
  - override /method/dataloader: [single_graph]
- - override /method/callbacks: ckpt_ema_bond_dist
+ - override /method/callbacks: ckpt_orig_midi
 
 method:
     trainer:
@@ -15,17 +15,17 @@ method:
         check_val_every_n_epoch: 10
         gradient_clip_val: 1.0
     
-    callbacks:
-        early_stopping:
-            EarlyStopping:
-                patience: 20
+    # callbacks:
+    #     early_stopping:
+    #         EarlyStopping:
+    #             patience: 20
     model:
         params:
             cfg:
                 model:
-                    batch_size: 1
+                    batch_size: 8
             validation:
-                how_many_to_generate: 1024
+                how_many_to_generate: 512
 
 logger:
     WandbLogger:

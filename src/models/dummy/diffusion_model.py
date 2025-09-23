@@ -600,7 +600,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         output_graph = sparsify_data(
             subgraph = dense_graph,
             subgraph_nodes_num = n_nodes,
-        )
+        ).to('cpu')
         # finally, transform SparseGraph (batched) to a list of SparseGraph objects
         output_graphs = output_graph.to_data_list()
         
