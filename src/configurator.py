@@ -440,7 +440,7 @@ class RunContext:
                 if best_filename is not None:
                     self.logger.warning(f'Found checkpoint {best_filename}, evaluating it...')
                     # evaluate the model using best checkpoint
-                    filepath = self.run_directory / best_filename
+                    filepath = str(self.run_directory / best_filename)
                     curr_metrics = self.evaluate_ckpt(filepath, validation=validation)
                 else:
                     self.logger.warning(f'No best checkpoint found, evaluating last checkpoint...')
