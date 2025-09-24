@@ -1,0 +1,21 @@
+# @package _global_
+defaults:
+ - ../base
+
+
+method:
+    model:
+        params:
+            denoising:
+                loss:
+                    lambda_train_D: 6.0
+    # trainer:
+    #     gradient_clip_val: 1.0
+
+
+config_name: qm9-d4-nogradclip-lambda_d2
+
+
+mode: train+eval
+compile: false
+seed: 0
