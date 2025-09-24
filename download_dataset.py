@@ -17,6 +17,7 @@ from src.data.filters import reg_filters
 from src.datatypes import reg_dataset_wrapper
 
 from copy import deepcopy
+from src.configurator import seed_everything
 
 # import monkey patches for fixing bugs in torch and torch_geometric for MPS devices
 import platform
@@ -32,6 +33,7 @@ def main(cfg: DictConfig):
     with open_dict(cfg):
         cfg.hydra = HydraConfig.get()
 
+    seed_everything(cfg.seed)
 
     cfg_dataset = cfg.task.dataset
     cfg_pretf = cfg.task.pre_transform
@@ -69,16 +71,6 @@ def main(cfg: DictConfig):
         dataset_name, dataset_params_mod, pre_transform=pre_transform, **addons
     )
 
-    # add wrappers to dataset if there are any
-    if cfg_dswrapper is not None:
-        if not isinstance(cfg_dswrapper, list):
-            cfg_dswrapper = [cfg_dswrapper]
-        dataset_wrappers = [(reg_dataset_wrapper.get_class(dsw['name']), dsw['params']) for dsw in cfg_dswrapper]
-        
-        # dataset wrappers will wrap the datasets returned by the data resource
-        # a wrapper can add new data to the dataset elements and info
-        # TODO: make wrappers save data, avoiding to recompute it every time a new dataset instance is created
-        data_resources.add_dataset_wrapper(dataset_wrappers)
         
     data_resources.prepare_data()
         
