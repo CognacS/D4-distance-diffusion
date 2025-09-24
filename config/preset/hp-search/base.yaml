@@ -6,7 +6,7 @@ defaults:
  - override /logger: wandb
  - override /method: d4
  - override /method/trainer: molecular_trainer
- - override /method/dataloader: [base_dataloader, batch_2048, workers_8]
+ - override /method/dataloader: [base_dataloader, batch_1536, workers_8]
  - override /method/callbacks: ckpt_ema_dist
 
 method:
