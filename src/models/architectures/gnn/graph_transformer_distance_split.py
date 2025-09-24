@@ -42,11 +42,12 @@ class XEyTransformerLayer(nn.Module):
     def __init__(self, dx: int, de: int, dy: int, heads: int, dim_ffX: int = 2048, dd=128,
                  dim_ffE: int = 128, dim_ffy: int = 2048, dim_ffD: int = 128 ,dropout: float = 0.1,
                  layer_norm_eps: float = 1e-5, device=None, dtype=None, last_layer=False,
-                 extended_D_ffn=True) -> None:
+                 extended_D_ffn=True, pre_norm=False) -> None:
         kw = {'device': device, 'dtype': dtype}
         super().__init__()
 
         self.extended_D_ffn = extended_D_ffn
+        self.pre_norm = pre_norm
         #self.self_attn = NodeEdgeBlock(dx, de, dy, n_head, last_layer=last_layer)
         #self.self_attn = XEySelfAttention(dx, de, dy, dd ,n_head)
         self.self_attn = GraphSelfAttention(dx, de, dy, dd, last_layer=last_layer, n_head=heads)
@@ -85,6 +86,7 @@ class XEyTransformerLayer(nn.Module):
         self.dropout_dtris = Dropout(dropout)
 
         self.last_layer = last_layer
+        
         if not last_layer:
             self.lin_y1 = Linear(dy, dim_ffy, **kw)
             self.lin_y2 = Linear(dim_ffy, dy, **kw)
@@ -93,6 +95,12 @@ class XEyTransformerLayer(nn.Module):
             self.dropout_y1 = Dropout(dropout)
             self.dropout_y2 = Dropout(dropout)
             self.dropout_y3 = Dropout(dropout)
+            
+        if last_layer and pre_norm:
+            # in the case of pre_norm, layer norm is needed
+            # for the last layer as well
+            self.norm_y1 = LayerNorm(dy, eps=layer_norm_eps, **kw)
+            
 
         self.activation = F.silu
 
@@ -110,54 +118,89 @@ class XEyTransformerLayer(nn.Module):
         e_mask2 = x_mask.unsqueeze(1)           # bs, 1, n, 1
         #newX, newE, new_y, vel = self.self_attn(X=X, ,E=E, y=y, node_mask=node_mask, dist=pos, edge_mask_triangular=edge_mask_triangular)
 
+
+        ########################  SELF-ATTENTION BLOCK  ########################
+        #### APPLY PRE-NORM IF SPECIFIED ####
+        if self.pre_norm:
+            X = self.normX1(X)
+            E = self.normE1(E)
+            D = self.normD1(D)
+            y = self.norm_y1(y)
+
         newX, newE, new_y, vel = self.self_attn(X=X, E=E, y=y, node_mask=node_mask,
                                                 dist=D, edge_mask=edge_mask)
 
         newX_d = self.dropoutX1(newX)
         # X = self.normX1(X + newX_d, x_mask)
-        X = self.normX1(X + newX_d)
+        X = X + newX_d
 
         newD_d = self.dropoutD1(vel)
-        D = self.normD1(D + newD_d)
+        D = D + newD_d
 
         newE_d = self.dropoutE1(newE)
-        # E = self.normE1(E + newE_d, e_mask1, e_mask2)
-        E = self.normE1(E + newE_d)
+        E = E + newE_d
 
         if not self.last_layer:
             new_y_d = self.dropout_y1(new_y)
-            y = self.norm_y1(y + new_y_d)
+            y = y + new_y_d
+        
+        #### APPLY POST-NORM IF SPECIFIED (DEFAULT) ####
+        if not self.pre_norm:
+            X = self.normX1(X)
+            E = self.normE1(E)
+            D = self.normD1(D)
+            if not self.last_layer:
+                y = self.norm_y1(y)
 
+        #####################  FEED-FORWARD NETWORK BLOCK  #####################
+        #### APPLY PRE-NORM IF SPECIFIED ####
+        if self.pre_norm:
+            X = self.normX2(X)
+            E = self.normE2(E)
+            D = self.normD2(D)
+            if not self.last_layer:
+                y = self.norm_y2(y)
+
+        #### X FFN ####
         ff_outputX = self.linX2(self.dropoutX2(self.activation(self.linX1(X))))
         ff_outputX = self.dropoutX3(ff_outputX)
         # X = self.normX2(X + ff_outputX, x_mask)
-        X = self.normX2(X + ff_outputX)
+        X = X + ff_outputX
 
+        #### E FFN ####
         ff_outputE = self.linE2(self.dropoutE2(self.activation(self.linE1(E))))
         ff_outputE = self.dropoutE3(ff_outputE)
-
-        E = self.normE2(E + ff_outputE)
-        E = 0.5 * (E + torch.transpose(E, 1, 2))
-
+        E = E + ff_outputE
+        
+        #### D FFN ####
         if self.extended_D_ffn:
             D_1 = (((self.activation(self.linD1(D)))))
             D_2 = (((self.activation(self.linD2_bis(D_1)))))
             D_3 = (((self.activation(self.linD3_bis(D_2)))))
-
             ff_outputD = self.linD2(D_3)
+            
         else:
-
             ff_outputD = self.linD2((self.dropoutD2(self.activation(self.linD1(D)))))
             ff_outputD = self.dropoutD3(ff_outputD)
-
-        D = self.normD2(D + ff_outputD)
-        D = 0.5 * (D + torch.transpose(D,1,2))
-
-
+        D = D + ff_outputD
+        
+        #### y FFN ####
         if not self.last_layer:
             ff_output_y = self.lin_y2(self.dropout_y2(self.activation(self.lin_y1(y))))
             ff_output_y = self.dropout_y3(ff_output_y)
-            y = self.norm_y2(y + ff_output_y)
+            y = y + ff_output_y
+            
+        #### APPLY POST-NORM IF SPECIFIED (DEFAULT) ####
+        if not self.pre_norm:
+            X = self.normX2(X)
+            E = self.normE2(E)
+            D = self.normD2(D)
+            if not self.last_layer:
+                y = self.norm_y2(y)
+        
+        #### symmetrize E and D ####
+        E = 0.5 * (E + torch.transpose(E, 1, 2))
+        D = 0.5 * (D + torch.transpose(D, 1, 2))
 
         return X, E, y, D
 
