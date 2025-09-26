@@ -1,9 +1,9 @@
-name: gdb13
+name: zinc250k
 params:
     random_splits:
         train: null
-        valid: 0.1
-        test: 0.1
+        valid: 0.16 # 0.8 * 0.2
+        # test is predefined
     include_pos: true
     include_charges: true
     sanitize: false

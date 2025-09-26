@@ -1,0 +1,8 @@
+name: geom-drugs
+params:
+    include_pos: true
+    include_charges: true
+    sanitize: false
+    kekulize: true
+    remove_hydrogens: true
+    hard_remove_hydrogens: false

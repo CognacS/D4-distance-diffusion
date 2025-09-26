@@ -10,9 +10,10 @@ import torch
 from torch_geometric.io.fs import makedirs
 from src.data.datasets.core import RawDataset, ProcessedDataset
 
-from src.data.simple_transforms.molecular import GraphToMoleculeConverter, mol2smiles, smiles2mol
+from src.data.simple_transforms.molecular import GraphToMoleculeConverter, mol2smiles, smiles2mol, mol2mol
 from src.data.utils.graphs import get_torch_graphs_stats
 from src.datatypes.sparse import SparseGraph
+from src.data.simple_transforms.molecular import verify_and_compute_3d_conformer
 
 import src.data.utils.molecular as molutils
 
@@ -37,9 +38,11 @@ class MolecularGraphsDataset(ProcessedDataset):
             include_pos: bool = False,
             include_charges: bool = False,
             num_workers: int = 0,
+            chunksize: Optional[int] = None,
             transform: Optional[Callable] = None,
             pre_transform: Optional[Callable] = None,
-            pre_filter: Optional[Callable] = None
+            pre_filter: Optional[Callable] = None,
+            not_splittable: bool = False
         ) -> None:
 
         # hydrogen removal: during process method call all hydrogens are removed
@@ -47,6 +50,7 @@ class MolecularGraphsDataset(ProcessedDataset):
         self.include_pos = include_pos
         self.include_charges = include_charges
         self.num_workers = num_workers
+        self.chunksize = chunksize
         if hard_remove_hydrogens and 'H' in atom_types:
             atom_types.remove('H')
 
@@ -67,7 +71,7 @@ class MolecularGraphsDataset(ProcessedDataset):
         self.raw_mol_dataset = raw_mol_dataset
 
         # call super constructor -> process data
-        super().__init__(root, split, transform, pre_transform, pre_filter)
+        super().__init__(root, split, transform, pre_transform, pre_filter, not_splittable=not_splittable)
 
         # remove reference to base dataset, no need for it
         del self.raw_mol_dataset
@@ -82,7 +86,7 @@ class MolecularGraphsDataset(ProcessedDataset):
         subset.root = self.root
         subset.split = name
         makedirs(subset.processed_dir)
-        subset.save([self[i] for i in indices], subset.processed_paths[0])
+        subset.save([self[i] for i in indices if i < len(self)], subset.processed_paths[0])
         subset.load(subset.processed_paths[0], SparseGraph)
 
         num_cls = {
@@ -110,7 +114,8 @@ class MolecularGraphsDataset(ProcessedDataset):
         molecule, properties = self.data_to_mol_and_prop(data)
         # convert molecule to graph (optional: fully remove hydrogens)
         graph = self.mol_to_torch_converter.molecule_to_graph(
-            molecule, hard_remove_hydrogens=self.hard_remove_hydrogens
+            molecule, hard_remove_hydrogens=self.hard_remove_hydrogens,
+            kekulize=False # kekulization will be done before if needed
         )
         # add properties to graph if there are any
         if properties is not None:
@@ -122,9 +127,13 @@ class MolecularGraphsDataset(ProcessedDataset):
     def process(self):
         
         dataset = [self.raw_mol_dataset[i] for i in range(len(self.raw_mol_dataset))]
-        
+        #dataset = [self.raw_mol_dataset[i] for i in range(10000)] # TEMPORARY, REMOVE LATER
+
         if self.num_workers > 0:
-            chunksize = len(dataset) // self.num_workers // 5
+            if self.chunksize is not None:
+                chunksize = self.chunksize
+            else:
+                chunksize = len(dataset) // self.num_workers // 5
             
             # transform
             results = process_map(
@@ -133,10 +142,13 @@ class MolecularGraphsDataset(ProcessedDataset):
             )
         else:
             # no parallelization, just convert
-            #results = [self._prepare_data_worker(data) for data in tqdm(self.raw_mol_dataset, desc='Converting Chem.Mols to SparseGraphs')]
-            results = []
-            for data in tqdm(dataset, desc='Converting Chem.Mols to SparseGraphs'):
-                results.append(self._prepare_data_worker(data))
+           #results = [self._prepare_data_worker(data) for data in tqdm(self.raw_mol_dataset, desc='Converting Chem.Mols to SparseGraphs')]
+           results = []
+           for data in tqdm(dataset, desc='Converting Chem.Mols to SparseGraphs'):
+               results.append(self._prepare_data_worker(data))
+            # results = []
+            # for data in dataset:
+            #     results.append(self._prepare_data_worker(data))
         
         self.pre_transform_filter_and_finalize(results, self.pre_transform, self.pre_filter)
 
@@ -150,10 +162,10 @@ class MolecularGraphsDataset(ProcessedDataset):
         ) -> None:
         # useful method to apply a pre_transform/pre_filter to an already processed dataset
         graphs = []
-        for graph in input_graphs:
+        for i, graph in enumerate(input_graphs):
 
             # apply pre_transform if any
-            if pre_filter is not None and not pre_filter(graph):
+            if pre_filter is not None and not pre_filter(graph, i):
                 continue
             if pre_transform is not None:
                 graph = pre_transform(graph)
@@ -208,11 +220,12 @@ class SmilesDataset(RawDataset):
             raw_mol_dataset: RawDataset,
             split: Optional[str] = None,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            not_splittable: bool = False
         ):
 
         self.raw_mol_dataset = raw_mol_dataset
-        super().__init__(root, split=split, pre_transform=pre_transform, pre_filter=pre_filter)
+        super().__init__(root, split=split, pre_transform=pre_transform, pre_filter=pre_filter, not_splittable=not_splittable)
         del self.raw_mol_dataset
 
         if not hasattr(self, 'smiles'):
@@ -239,14 +252,18 @@ class SmilesDataset(RawDataset):
 
         # get all smiles from the raw dataset
         smiles = []
-        for data in tqdm(self.raw_mol_dataset, desc='Converting Chem.Mols to SMILES strings'):
+        for i, data in enumerate(tqdm(self.raw_mol_dataset, desc='Converting Chem.Mols to SMILES strings')):
+            
+            if self.pre_filter is not None and not self.pre_filter(data, i):
+                continue
+                
             # get molecule and properties
             molecule, properties = self.data_to_mol_and_prop(data)
             # convert molecule to smiles
             smiles.append(mol2smiles(molecule))
 
         self.smiles = smiles
-        self.save(self.smiles, self.raw_paths[0])
+        self.save(self.smiles, self.raw_paths[0])  
     
 
     def data_to_mol_and_prop(self, sample):
@@ -388,6 +405,213 @@ class MolecularDataset(RawDataset):
         else: # no properties
             return sample, None
         
+
+    def __len__(self):
+        return len(self.mols)
+    
+    def __getitem__(self, idx):
+        return self.mols[idx], self.props[idx]
+
+
+class MoleculeDatasetWorker:
+    
+    def __init__(
+            self,
+            sanitize: bool = False,
+            remove_hydrogens: bool = False,
+            kekulize: bool = False,
+            compute_3d_conformer: bool = False,
+            properties_computer_function: Optional[Callable] = None,
+            pre_transform=None,
+            pre_filter=None
+        ):
+        self.sanitize = sanitize
+        self.remove_hydrogens = remove_hydrogens
+        self.kekulize = kekulize
+        self.compute_3d_conformer = compute_3d_conformer
+        self.properties_computer_function = properties_computer_function
+        self.pre_transform = pre_transform
+        self.pre_filter = pre_filter
+    
+    
+    def __call__(self, args) -> tuple:
+        
+        smiles_or_mol: str
+        props: OrderedDict
+        smiles_or_mol, props = args
+        
+        try:
+            if isinstance(smiles_or_mol, str):
+                # convert smiles to mol
+                mol = smiles2mol(smiles_or_mol, sanitize=self.sanitize, remove_hydrogens=self.remove_hydrogens)
+            else:
+                # preprocess mol
+                mol = mol2mol(smiles_or_mol, sanitize=self.sanitize, remove_hydrogens=self.remove_hydrogens)
+
+            # if needed, compute 3D conformer
+            if self.compute_3d_conformer and mol is not None:
+                mol = verify_and_compute_3d_conformer(mol)
+                
+            if self.kekulize and mol is not None:
+                mol = molutils.kekulize_molecule(mol)
+            
+            # if something went wrong, discard the molecule
+            if mol is None:
+                return (None, None, None)
+
+            if self.pre_filter is not None and not self.pre_filter(mol):
+                return (None, None, None)
+
+            if self.pre_transform is not None:
+                mol = self.pre_transform(mol)
+
+            if self.properties_computer_function is not None:
+                p_new = self.properties_computer_function(mol)
+                props.update(p_new) # add new properties to the existing ones
+                
+            return (mol, props, None)
+        
+        except Exception as e:
+            # print(f'Error processing molecule: {e}')
+            return (None, None, str(e))
+    
+class ExtendedMolecularDatasetRaw(RawDataset):
+
+    def __init__(
+            self,
+            root: Optional[str] = None,
+            split: Optional[str] = None,
+            sanitize: bool = False,
+            remove_hydrogens: bool = False,
+            kekulize: bool = False,
+            compute_3d_conformer: bool = False,
+            properties_computer_function: Optional[Callable] = None,
+            num_workers: int = 0,
+            chunksize: Optional[int] = None,
+            pre_transform=None,
+            pre_filter=None,
+            not_splittable: bool = False
+        ):
+        
+        self.sanitize = sanitize
+        self.remove_hydrogens = remove_hydrogens
+        self.kekulize = kekulize
+        self.properties_computer_function = properties_computer_function
+        self.compute_3d_conformer = compute_3d_conformer
+        self.num_workers = num_workers
+        self.chunksize = chunksize
+        self.pre_transform = pre_transform
+        self.pre_filter = pre_filter
+
+        super().__init__(root, split=split, pre_transform=pre_transform, pre_filter=pre_filter, not_splittable=not_splittable)
+
+    
+    
+    def load_data(self, mols_path: str, props_path: str, stats_path: str):
+        if not hasattr(self, 'mols'):
+            self.mols = self.load(mols_path)
+            self.props = self.load(props_path)
+            self.stats = self.load(stats_path)
+            self.atom_types = self.stats['atom_types']
+            self.bond_types = self.stats['bond_types']
+            self.charges = self.stats['charges'] if 'charges' in self.stats else None
+
+
+    def subset_from(self, indices: List[int], name: str, mols_path: str, props_path: str, stats_path: str):
+        """Create a subset of the dataset with the indices provided, at the folder
+        name provided. This is useful for splitting the dataset into train, test, and validation
+        """
+
+        subset = copy(self)
+        subset.root = self.root
+        subset.split = name
+        makedirs(subset.raw_dir)
+        subset.mols = [self.mols[i] for i in indices if i < len(self.mols)]
+        subset.props = [self.props[i] for i in indices if i < len(self.props)]
+
+        # save data
+        subset.save(subset.mols, mols_path)
+        subset.save(subset.props, props_path)
+
+        # get statistics
+        stats_new = molutils.get_molecule_stats(subset.mols)
+        stats_new['atom_types'] = self.atom_types # use old atom types
+        stats_new['bond_types'] = self.bond_types # use old bond types
+        stats_new['charges'] = self.charges # use old charges
+        subset.stats = stats_new
+        subset.atom_types = self.atom_types
+        subset.bond_types = self.bond_types
+        subset.charges = self.charges
+        
+        # store data in files
+        subset.save(subset.stats, stats_path)
+
+        return subset
+
+
+    def preprocess_molecules(self, smiles_or_mols: List[str], props: List[OrderedDict], mols_path: str, props_path: str) -> tuple:
+
+        type_of_data = 'SMILES' if isinstance(smiles_or_mols[0], str) else 'raw Chem.Mols'
+
+        ###################  LOAD DATA IF IT ALREADY EXISTS  ###################
+        # if already exists mols and props in files, load them
+        if osp.exists(mols_path) and osp.exists(props_path):
+            print('Molecules and properties files already exist, loading them...')
+            mols = self.load(mols_path)
+            props = self.load(props_path)
+            print(f'Loaded {len(mols)} molecules from files.',
+                  'If this should not be the case, please delete the files and re-run.')
+
+        else:
+            ####################  PREPARE LISTS AND WORKER  ####################
+            mols = []
+            new_props = []
+            how_many = len(smiles_or_mols)
+            iterable = zip(smiles_or_mols, props)
+            worker = MoleculeDatasetWorker(
+                sanitize=self.sanitize,
+                remove_hydrogens=self.remove_hydrogens,
+                kekulize=self.kekulize,
+                compute_3d_conformer=self.compute_3d_conformer,
+                properties_computer_function=self.properties_computer_function,
+                pre_transform=self.pre_transform,
+                pre_filter=self.pre_filter
+            )
+
+            ########################  MULTIPROCESSING  #########################
+            if self.num_workers > 0:
+                if self.chunksize is None:
+                    chunksize = max(1, how_many // (20 * self.num_workers))
+                else:
+                    chunksize = self.chunksize
+                
+                results = process_map(
+                    worker, iterable, max_workers=self.num_workers, chunksize=chunksize,
+                    desc=f'Converting {type_of_data} to processed Chem.Mols', total=how_many
+                )
+                for mol, p, err in results:
+                    if err is None and mol is not None:
+                        mols.append(mol)
+                        new_props.append(p)
+                    else:
+                        print(err)
+            
+            #######################  NO MULTIPROCESSING  #######################
+            else:
+                for s_or_m, p in tqdm(iterable, total=how_many, desc=f'Converting {type_of_data} to processed Chem.Mols'):
+                    mol, p, err = worker((s_or_m, p))
+                    if err is None and mol is not None:
+                        mols.append(mol)
+                        new_props.append(p)
+                    else:
+                        print(err)
+            
+            # save data
+            self.save(mols, mols_path)
+            self.save(new_props, props_path)
+
+        return mols, new_props
+
 
     def __len__(self):
         return len(self.mols)

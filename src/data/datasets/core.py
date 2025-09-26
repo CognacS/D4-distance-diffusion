@@ -33,13 +33,13 @@ class RawDataset(Dataset, ABC):
     as the torch_geometric Dataset on the raw/download part, altough simplified.
     This is useful for pre-looking at data, and to create a better pipeline."""
 
-    def __init__(self, root: str, split: Optional[str] = None, pre_transform=None, pre_filter=None):
+    def __init__(self, root: str, split: Optional[str] = None, pre_transform=None, pre_filter=None, not_splittable: bool = False):
         super().__init__()
 
         self.root = root
         self.split = split
 
-        if split is not None and not files_exist(self.raw_paths):
+        if split is not None and not files_exist(self.raw_paths) and not not_splittable:
             raise DatasetException('Trying to instantiate a split of a dataset that was not split yet.')
         
         self.pre_transform = pre_transform
@@ -123,12 +123,12 @@ class RawDataset(Dataset, ABC):
 
 class ProcessedDataset(InMemoryDataset, ABC):
 
-    def __init__(self, root: str, split: Optional[str] = None, transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root: str, split: Optional[str] = None, transform=None, pre_transform=None, pre_filter=None, not_splittable: bool = False):
 
         self.root = root
         self.split = split
 
-        if split is not None and not files_exist(self.processed_paths):
+        if split is not None and not files_exist(self.processed_paths) and not not_splittable:
             raise DatasetException('Trying to instantiate a split of a dataset that was not split yet.')
         
         super().__init__(self.root, transform, pre_transform, pre_filter)
