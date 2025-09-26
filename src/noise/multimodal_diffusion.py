@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Callable
 
 import torch
 from torch import Tensor, IntTensor
@@ -301,6 +301,63 @@ class StructuredMultimodalDiffusionProcess(MultimodalDiffusionProcess, ABC):
                 kwargs_per_data,
                 **kwargs
             ),
-            current_datapoint
+            original_datapoint
         )
     
+
+
+class ChainedNoiseProcess(NoiseProcess):
+    """
+    Class for chaining many noise processes together.
+    """
+
+    def __init__(
+            self,
+            noise_process_before: StructuredMultimodalDiffusionProcess,
+            noise_process_after: StructuredMultimodalDiffusionProcess,
+            combine_stationary: Callable=None,
+            chain_sample_next: Callable=None,
+            chain_sample_from_original: Callable=None,
+            chain_sample_posterior: Callable=None,
+            **kwargs
+        ):
+        schedule = noise_process_before.schedule
+        super().__init__(schedule=schedule)
+        
+        self.noise_process_before = noise_process_before
+        self.noise_process_after = noise_process_after
+        self.combine_stationary = combine_stationary
+        self.chain_sample_next = chain_sample_next
+        self.chain_sample_from_original = chain_sample_from_original
+        self.chain_sample_posterior = chain_sample_posterior
+        
+        
+    def sample_stationary(self, **kwargs):
+        stat1 = self.noise_process_before.sample_stationary(**kwargs)
+        stat2 = self.noise_process_after.sample_stationary(**kwargs)
+        if self.combine_stationary is not None:
+            return self.combine_stationary(stat1, stat2)
+        else:
+            return (stat1, stat2)
+     
+    
+    def sample_next(self, current_datapoint, t, **kwargs):
+        current_datapoint = self.noise_process_before.sample_next(current_datapoint, t, **kwargs)
+        if self.chain_sample_next is not None:
+            current_datapoint = self.chain_sample_next(current_datapoint, t, **kwargs)
+        next_datapoint = self.noise_process_after.sample_next(current_datapoint, t, **kwargs)
+        return next_datapoint
+    
+    def sample_from_original(self, original_datapoint, t, **kwargs):
+        original_datapoint = self.noise_process_before.sample_from_original(original_datapoint, t, **kwargs)
+        if self.chain_sample_from_original is not None:
+            original_datapoint = self.chain_sample_from_original(original_datapoint, t, **kwargs)
+        step_t_datapoint = self.noise_process_after.sample_from_original(original_datapoint, t, **kwargs)
+        return step_t_datapoint
+    
+    def sample_posterior(self, original_datapoint, current_datapoint, t, **kwargs):
+        original_datapoint = self.noise_process_before.sample_posterior(original_datapoint, current_datapoint, t, **kwargs)
+        if self.chain_sample_posterior is not None:
+            original_datapoint = self.chain_sample_posterior(original_datapoint, t, **kwargs)
+        prev_datapoint = self.noise_process_after.sample_posterior(original_datapoint, current_datapoint, t, **kwargs)
+        return prev_datapoint

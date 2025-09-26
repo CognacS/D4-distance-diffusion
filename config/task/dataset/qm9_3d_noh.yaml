@@ -10,4 +10,4 @@ params:
     sanitize: false
     kekulize: true
     remove_hydrogens: true
-    hard_remove_hydrogens: True
+    hard_remove_hydrogens: true

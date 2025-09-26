@@ -1,1 +1,1 @@
-from . import graph_transformer, graph_transformer_distance_split
+from . import graph_transformer, graph_transformer_distance_split, distance_graph_transformer_qm9

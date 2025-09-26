@@ -1,4 +1,5 @@
-GraphTransformerDistanceOriginal:
+name: distance_GraphTransformer_qm9
+params:
     encdec_hidden_dims:
         x: 256
         edge_adjmat: 128
@@ -9,16 +10,15 @@ GraphTransformerDistanceOriginal:
         x: 256
         edge_adjmat: 64
         y: 64
-        edge_dist: 128
 
     transf_ffn_dims:
         x: 256
         edge_adjmat: 128
         y: 256
-        edge_dist: 256
 
     transf_hparams:
         heads: 8
 
     num_layers: 12
     use_residuals_inout: true
+    simpler: true

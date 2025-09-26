@@ -1,0 +1,5 @@
+EarlyStopping:
+    monitor: valid_denoising/denoise_total
+    mode: min
+    verbose: true
+    patience: 20

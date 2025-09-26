@@ -2,11 +2,12 @@
 defaults:
  - override /method/model/architecture@method.model.params.denoising.architecture: graph_transformer/gt_large_distance_orig
  - override /task: qm9_3d
+ - override /task/test: molecular_3d_pre
  - override /logger: wandb
  - override /method: d4
  - override /method/trainer: molecular_trainer
- - override /method/dataloader: [base_dataloader, batch_1024, workers_8]
- - override /method/callbacks: ckpt_orig_d4
+ - override /method/dataloader: [base_dataloader, batch_1536, workers_8]
+ - override /method/callbacks: ckpt_ema_dist
 
 method:
     model:
@@ -15,20 +16,24 @@ method:
                 batch_size: 1024
             validation:
                 how_many_to_generate: 1024
-
             embed_time: true
             features:
                 - indegree
                 - nodes_num
                 - spectral
+                - eigen_distance
             denoising:
+                distance_output_mode: conditional
+                #distance_output_mode: single
                 loss:
                     lambda_train_X: 1.0
                     lambda_train_C: 1.0
                     lambda_train_E: 2.0
                     lambda_train_D: 1.0
+                    lambda_eigenvalues_regularization: 1.0
     trainer:
         log_every_n_steps: 400
+        check_val_every_n_epoch: 10
         #gradient_clip_val: 1.0
     
     callbacks:
@@ -38,11 +43,10 @@ method:
 
 logger:
     WandbLogger:
-        project: d4-generation
+        project: d4-hparams
         group: qm9-d4
-
-config_name: qm9-d4
 
 
 mode: train+eval
-compile: true
+compile: false
+seed: 0

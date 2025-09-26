@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
- - /method/model/architecture/graph_transformer@method.model.params.denoising.architecture: gt_large_distance_orig_qm9
+ - override /method/model/architecture@method.model.params.denoising.architecture: graph_transformer/gt_large_distance_orig
  - override /task: qm9_3d
  - override /logger: wandb
  - override /method: d4

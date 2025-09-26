@@ -113,7 +113,15 @@ class BondDistanceDistributionMetric(BaseSamplingMetric):
                 bond_type_s = bond_type_s + (mol.edge_attr+1).tolist()
 
             for i, d in enumerate(distances_to_consider):
-                generated_bond_lenghts[mol.edge_attr[i].item()+1][d.item()] += 1
+                try:
+                    generated_bond_lenghts[mol.edge_attr[i].item()+1][d.item()] += 1
+                except Exception as e:
+                    print(mol.edge_attr)
+                    print(d.item())
+                    print(mol)
+                    print(distances_to_consider)
+                    print(generated_bond_lenghts)
+                    raise e
 
 
         for bond_type in range(1,5):
@@ -372,10 +380,10 @@ class ValidMoleculeMetric(BaseSamplingMetric):
                     if smiles != '' and smiles is not None:
                         valid_smiles.append(smiles)
                 except Chem.rdchem.AtomValenceException:
-                    print("Valence error in GetmolFrags")
+                    #print("Valence error in GetmolFrags")
                     all_smiles.append(None)
                 except Chem.rdchem.KekulizeException:
-                    print("Can't kekulize molecule")
+                    #print("Can't kekulize molecule")
                     all_smiles.append(None)
             else:
                 all_smiles.append(None)

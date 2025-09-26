@@ -1,19 +1,5 @@
 from typing import Optional, Dict, Tuple
 
-import torch
-import torch.nn as nn
-from torch import Tensor
-
-from src.datatypes.dense import DenseGraph, DenseEdges, get_bipartite_edge_mask_dense, get_edge_mask_dense
-from src.datatypes.features.posenc import SinusoidalPosEmb
-
-from src.models.architectures.gnn.graph_transformer import (
-    DIM_X, DIM_E, DIM_Y,
-    Etoy, Xtoy, EtoX
-)
-
-from typing import Optional, Dict, Tuple
-
 import math
 
 import torch
@@ -23,10 +9,62 @@ from torch.nn.modules.linear import Linear
 from torch.nn.modules.normalization import LayerNorm
 from torch.nn import functional as F
 from torch import Tensor
+from torch.nn import init
+
 
 from torch.nn.modules.linear import Linear
 
 from src.datatypes.dense import DenseGraph, DenseEdges, get_bipartite_edge_mask_dense, get_edge_mask_dense
+
+class Xtoy(nn.Module):
+    def __init__(self, dx, dy):
+        """ Map node features to global features """
+        super().__init__()
+        self.lin = nn.Linear(4 * dx, dy)
+
+    def forward(self, X, x_mask):
+        """ X: bs, n, dx. """
+        x_mask = x_mask.expand(-1, -1, X.shape[-1])
+        float_imask = 1 - x_mask.float()
+        m = X.sum(dim=1) / torch.sum(x_mask, dim=1)
+        mi = (X + 1e5 * float_imask).min(dim=1)[0]
+        ma = (X - 1e5 * float_imask).max(dim=1)[0]
+        std = torch.sum(((X - m[:, None, :]) ** 2) * x_mask, dim=1) / torch.sum(x_mask, dim=1)
+        z = torch.hstack((m, mi, ma, std))
+        out = self.lin(z)
+        return out
+
+
+class Etoy(nn.Module):
+    def __init__(self, d, dy):
+        """ Map edge features to global features. """
+        super().__init__()
+        self.lin = nn.Linear(4 * d, dy)
+
+    def forward(self, E, e_mask1, e_mask2):
+        """ E: bs, n, n, de
+            Features relative to the diagonal of E could potentially be added.
+        """
+        mask = (e_mask1 * e_mask2).expand(-1, -1, -1, E.shape[-1])
+        float_imask = 1 - mask.float()
+        divide = torch.sum(mask, dim=(1, 2))
+        m = E.sum(dim=(1, 2)) / divide
+        mi = (E + 1e5 * float_imask).min(dim=2)[0].min(dim=1)[0]
+        ma = (E - 1e5 * float_imask).max(dim=2)[0].max(dim=1)[0]
+        std = torch.sum(((E - m[:, None, None, :]) ** 2) * mask, dim=(1, 2)) / divide
+        z = torch.hstack((m, mi, ma, std))
+        out = self.lin(z)
+        return out
+
+
+def masked_softmax(x, mask, **kwargs):
+    if torch.sum(mask) == 0:
+        return x
+    x_masked = x.clone()
+    x_masked[mask == 0] = -float("inf")
+    return torch.softmax(x_masked, **kwargs)
+
+
 
 
 class XEyTransformerLayer(nn.Module):
@@ -39,18 +77,15 @@ class XEyTransformerLayer(nn.Module):
         dropout: dropout probablility. 0 to disable
         layer_norm_eps: eps value in layer normalizations.
     """
-    def __init__(self, dx: int, de: int, dy: int, heads: int, dim_ffX: int = 2048, dd=128,
+    def __init__(self, dx: int, de: int, dy: int, n_head: int, dim_ffX: int = 2048, dd=128,
                  dim_ffE: int = 128, dim_ffy: int = 2048, dim_ffD: int = 128 ,dropout: float = 0.1,
-                 layer_norm_eps: float = 1e-5, device=None, dtype=None, last_layer=False,
-                 extended_D_ffn=True, pre_norm=False) -> None:
+                 layer_norm_eps: float = 1e-5, device=None, dtype=None, last_layer=False) -> None:
         kw = {'device': device, 'dtype': dtype}
         super().__init__()
 
-        self.extended_D_ffn = extended_D_ffn
-        self.pre_norm = pre_norm
         #self.self_attn = NodeEdgeBlock(dx, de, dy, n_head, last_layer=last_layer)
         #self.self_attn = XEySelfAttention(dx, de, dy, dd ,n_head)
-        self.self_attn = GraphSelfAttention(dx, de, dy, dd, last_layer=last_layer, n_head=heads)
+        self.self_attn = self_attention_mod(dx, de, dy, dd ,n_head, last_layer=last_layer)
 
         self.linX1 = Linear(dx, dim_ffX, **kw)
         self.linX2 = Linear(dim_ffX, dx, **kw)
@@ -79,14 +114,12 @@ class XEyTransformerLayer(nn.Module):
         self.dropoutD1 = Dropout(dropout)
         self.dropoutD2 = Dropout(dropout)
         self.dropoutD3 = Dropout(dropout)
-        if self.extended_D_ffn:
-            self.linD2_bis = Linear(dim_ffD, dim_ffD)
-            self.linD3_bis = Linear(dim_ffD, dim_ffD)
+        self.linD2_bis = Linear(dim_ffD, 256)
+        self.linD3_bis = Linear(256, dim_ffD)
         self.dropout_dbis = Dropout(dropout)
         self.dropout_dtris = Dropout(dropout)
 
         self.last_layer = last_layer
-        
         if not last_layer:
             self.lin_y1 = Linear(dy, dim_ffy, **kw)
             self.lin_y2 = Linear(dim_ffy, dy, **kw)
@@ -95,115 +128,80 @@ class XEyTransformerLayer(nn.Module):
             self.dropout_y1 = Dropout(dropout)
             self.dropout_y2 = Dropout(dropout)
             self.dropout_y3 = Dropout(dropout)
-            
-        if last_layer and pre_norm:
-            # in the case of pre_norm, layer norm is needed
-            # for the last layer as well
-            self.norm_y1 = LayerNorm(dy, eps=layer_norm_eps, **kw)
-            
 
-        self.activation = F.silu
+        self.activation = F.selu
 
-    def forward(
-            self,
+    def forward(self,
             X: Tensor,
             E: Tensor,
             y: Tensor,
-            D: Tensor,
             node_mask: Tensor,
-            edge_mask: Tensor,
+            pos: Tensor,
+            edge_mask_triangular: Tensor,
+            ext_X: Optional[Tensor]=None,
+            ext_E: Optional[Tensor]=None,
+            ext_node_mask: Optional[Tensor]=None,
         ) -> tuple[Tensor, Tensor, Tensor]:
+        """ Pass the input through the encoder layer.
+            X: (bs, n, d)
+            E: (bs, n, n, d)
+            y: (bs, dy)
+            node_mask: (bs, n) Mask for the src keys per batch (optional)
+            Output: newX, newE, new_y with the same shape.
+        """
         x_mask = node_mask.unsqueeze(-1)        # bs, n, 1
         e_mask1 = x_mask.unsqueeze(2)           # bs, n, 1, 1
         e_mask2 = x_mask.unsqueeze(1)           # bs, 1, n, 1
         #newX, newE, new_y, vel = self.self_attn(X=X, ,E=E, y=y, node_mask=node_mask, dist=pos, edge_mask_triangular=edge_mask_triangular)
 
-
-        ########################  SELF-ATTENTION BLOCK  ########################
-        #### APPLY PRE-NORM IF SPECIFIED ####
-        if self.pre_norm:
-            X = self.normX1(X)
-            E = self.normE1(E)
-            D = self.normD1(D)
-            y = self.norm_y1(y)
-
         newX, newE, new_y, vel = self.self_attn(X=X, E=E, y=y, node_mask=node_mask,
-                                                dist=D, edge_mask=edge_mask)
+                                                dist=pos, edge_mask_triangular=edge_mask_triangular)
 
         newX_d = self.dropoutX1(newX)
         # X = self.normX1(X + newX_d, x_mask)
-        X = X + newX_d
+        X = self.normX1(X + newX_d)
 
         newD_d = self.dropoutD1(vel)
-        D = D + newD_d
+        D = self.normD1(vel)
 
         newE_d = self.dropoutE1(newE)
-        E = E + newE_d
+        # E = self.normE1(E + newE_d, e_mask1, e_mask2)
+        E = self.normE1(E + newE_d)
 
         if not self.last_layer:
             new_y_d = self.dropout_y1(new_y)
-            y = y + new_y_d
-        
-        #### APPLY POST-NORM IF SPECIFIED (DEFAULT) ####
-        if not self.pre_norm:
-            X = self.normX1(X)
-            E = self.normE1(E)
-            D = self.normD1(D)
-            if not self.last_layer:
-                y = self.norm_y1(y)
+            y = self.norm_y1(y + new_y_d)
 
-        #####################  FEED-FORWARD NETWORK BLOCK  #####################
-        #### APPLY PRE-NORM IF SPECIFIED ####
-        if self.pre_norm:
-            X = self.normX2(X)
-            E = self.normE2(E)
-            D = self.normD2(D)
-            if not self.last_layer:
-                y = self.norm_y2(y)
-
-        #### X FFN ####
         ff_outputX = self.linX2(self.dropoutX2(self.activation(self.linX1(X))))
         ff_outputX = self.dropoutX3(ff_outputX)
         # X = self.normX2(X + ff_outputX, x_mask)
-        X = X + ff_outputX
+        X = self.normX2(X + ff_outputX)
 
-        #### E FFN ####
         ff_outputE = self.linE2(self.dropoutE2(self.activation(self.linE1(E))))
         ff_outputE = self.dropoutE3(ff_outputE)
-        E = E + ff_outputE
-        
-        #### D FFN ####
-        if self.extended_D_ffn:
-            D_1 = (((self.activation(self.linD1(D)))))
-            D_2 = (((self.activation(self.linD2_bis(D_1)))))
-            D_3 = (((self.activation(self.linD3_bis(D_2)))))
-            ff_outputD = self.linD2(D_3)
-            
-        else:
-            ff_outputD = self.linD2((self.dropoutD2(self.activation(self.linD1(D)))))
-            ff_outputD = self.dropoutD3(ff_outputD)
-        D = D + ff_outputD
-        
-        #### y FFN ####
+
+        E = self.normE2(E + ff_outputE)
+        E = 0.5 * (E + torch.transpose(E, 1, 2))
+
+        D_1 = (((self.activation(self.linD1(D)))))
+        D_2 = (((self.activation(self.linD2_bis(D_1)))))
+        D_3 = (((self.activation(self.linD3_bis(D_2)))))
+
+        ff_outputD = self.linD2(D_3)
+
+        #ff_outputD = self.linD2((self.dropoutD2(self.activation(self.linD1(D)))))
+        ff_outputD = (ff_outputD)
+
+        D = self.normD2(D + ff_outputD)
+        D = 0.5 * (D + torch.transpose(D,1,2))
+
+
         if not self.last_layer:
             ff_output_y = self.lin_y2(self.dropout_y2(self.activation(self.lin_y1(y))))
             ff_output_y = self.dropout_y3(ff_output_y)
-            y = y + ff_output_y
-            
-        #### APPLY POST-NORM IF SPECIFIED (DEFAULT) ####
-        if not self.pre_norm:
-            X = self.normX2(X)
-            E = self.normE2(E)
-            D = self.normD2(D)
-            if not self.last_layer:
-                y = self.norm_y2(y)
-        
-        #### symmetrize E and D ####
-        E = 0.5 * (E + torch.transpose(E, 1, 2))
-        D = 0.5 * (D + torch.transpose(D, 1, 2))
+            y = self.norm_y2(y + ff_output_y)
 
-        return X, E, y, D
-
+        return X, E, y, D, node_mask
 
 
 class MaskedSoftmax(nn.Module):
@@ -215,9 +213,8 @@ class MaskedSoftmax(nn.Module):
         x = x.masked_fill(~mask, -float('inf'))
         x = torch.softmax(x, dim=self.dim)
         return x.masked_fill(~mask, 0.0)
-    
 
-class GraphSelfAttention(nn.Module):
+class self_attention_mod(nn.Module):
     def __init__(
         self,
         dx: int,
@@ -314,7 +311,7 @@ class GraphSelfAttention(nn.Module):
         E: Tensor,
         y: Tensor,
         node_mask: Tensor,
-        edge_mask:Tensor,
+        edge_mask_triangular:Tensor,
         dist: Tensor
     ):
         bs, n, _ = X.shape
@@ -327,7 +324,7 @@ class GraphSelfAttention(nn.Module):
         # 1.1 Incorporate x
         x_e_mul1 = self.x_e_mul1(X) * x_mask
         x_e_mul2 = self.x_e_mul2(X) * x_mask
-        Y = Y * x_e_mul1.unsqueeze(1) * x_e_mul2.unsqueeze(2) * edge_mask
+        Y = Y * x_e_mul1.unsqueeze(1) * x_e_mul2.unsqueeze(2) * e_mask1 * e_mask2
 
         # aggiungi la E
 
@@ -377,7 +374,7 @@ class GraphSelfAttention(nn.Module):
         
         # 2.3 Self-attention
         softmax_mask = e_mask2.expand(-1, n, -1, self.n_head)
-        alpha = self.masked_softmax(a, softmax_mask).unsqueeze(-1)  # bs, n, n, n_head
+        alpha = masked_softmax(a, softmax_mask, dim=2).unsqueeze(-1)  # bs, n, n, n_head
         V = (self.v(X) * x_mask).unsqueeze(1).unsqueeze(3)      # bs, 1, n, 1, dx
         weighted_V = alpha * V                                  # bs, n, n, n_heads, dx
         weighted_V = weighted_V.sum(dim=2)                      # bs, n, n_head, dx
@@ -404,7 +401,7 @@ class GraphSelfAttention(nn.Module):
             y_out = None
         else:
             y = self.y_y(y)
-            e_y = self.e_y(Y, edge_mask)
+            e_y = self.e_y(Y, e_mask1, e_mask2)
             x_y = self.x_y(newX, x_mask)
             new_y = y + x_y + e_y
             y_out = self.y_out(new_y)     
@@ -412,13 +409,44 @@ class GraphSelfAttention(nn.Module):
         return Xout, Eout, y_out, newD.squeeze(-1)
 
 
+
+
+class EtoX(nn.Module):
+    def __init__(self, de, dx):
+        super().__init__()
+        self.lin = nn.Linear(4 * de, dx)
+
+    def forward(self, E, e_mask2):
+        """ E: bs, n, n, de"""
+        bs, n, _, de = E.shape
+        e_mask2 = e_mask2.expand(-1, n, -1, de)
+        float_imask = 1 - e_mask2.float()
+        m = E.sum(dim=2) / torch.sum(e_mask2, dim=2)
+        mi = (E + 1e5 * float_imask).min(dim=2)[0]
+        ma = (E - 1e5 * float_imask).max(dim=2)[0]
+        std = torch.sum(((E - m[:, :, None, :]) ** 2) * e_mask2, dim=2) / torch.sum(e_mask2, dim=2)
+        z = torch.cat((m, mi, ma, std), dim=2)
+        out = self.lin(z)
+        return out
+
+
+
+#############  TRANSFORMER OPTIONS  ##############
+
+from src.models.architectures.gnn.graph_transformer import DIM_X, DIM_E, DIM_Y
+from src.models.architectures.gnn.graph_transformer_distance_split import DIM_C, DIM_D
+
+if False:
+    POS_INF = 1e9
+    NEG_INF = -1e9
+else:
+    POS_INF = float('inf')
+    NEG_INF = float('-inf')
+
 from src.models import reg_architectures
 
-DIM_C = 'node_charges'
-DIM_D = 'edge_dist'
-
 @reg_architectures.register()
-class GraphTransformerDistanceOriginal(nn.Module):
+class distance_GraphTransformer_qm9(nn.Module):
     """
     n_layers : int -- number of layers
     dims : dict -- contains dimensions for each feature type
@@ -432,39 +460,24 @@ class GraphTransformerDistanceOriginal(nn.Module):
             transf_inout_dims: Dict,
             transf_ffn_dims: Dict,
             transf_hparams: Dict,
-            distance_dim: int = 16,
-            encode_distances: bool = False,
             use_residuals_inout: bool = True,
-            act_fn = 'silu',
+            act_fn_in = nn.ReLU,
+            act_fn_out = nn.ReLU,
+            simpler: bool = False,
             **kwargs
         ):
 
         super().__init__()
 
-        if act_fn == 'relu':
-            self.act_fn = nn.ReLU
-        elif act_fn == 'silu':
-            self.act_fn = nn.SiLU
-        else:
-            raise ValueError(f"Activation function {act_fn} not recognized")
-        
-        self.input_dims = input_dims
-        self.output_dims = output_dims
-
         self.num_layers = num_layers
         self.use_residuals_inout = use_residuals_inout
-        self.encode_distances = encode_distances
+        self.simpler = simpler
 
-        self.in_dim_x = input_dims[DIM_X] + input_dims[DIM_C]
+        self.in_dim_x = input_dims[DIM_X]
         self.in_dim_e = input_dims[DIM_E]
         self.in_dim_y = input_dims[DIM_Y]
-        
-        
-        if self.encode_distances:
-            self.distance_enc = SinusoidalPosEmb(distance_dim, scale=100.0)
-            self.in_dim_d = distance_dim - 1 + input_dims[DIM_D]
-        else:
-            self.in_dim_d = input_dims[DIM_D] 
+        self.in_dim_c = input_dims[DIM_C]
+        self.in_DIM_D = input_dims[DIM_D]
 
         self.encdec_hidden_dims = encdec_hidden_dims
         self.transf_inout_dims = transf_inout_dims
@@ -476,63 +489,76 @@ class GraphTransformerDistanceOriginal(nn.Module):
         self.out_dim_e = output_dims[DIM_E]
         self.out_dim_y = output_dims[DIM_Y]
         self.out_dim_c = output_dims[DIM_C]
-        self.out_dim_d = output_dims[DIM_D] # can be > 1, e.g., with periscopic or conditional distances
+        self.out_dim_dist = output_dims[DIM_D]
 
         ###########################  INPUT ENCODERS  ###########################
         # nodes encoder
         self.mlp_in_X = nn.Sequential(
-            nn.Linear(self.in_dim_x, encdec_hidden_dims[DIM_X]),
-            self.act_fn(),
+            nn.Linear(self.in_dim_x + self.in_dim_c, encdec_hidden_dims[DIM_X]),
+            act_fn_in(),
             nn.Linear(encdec_hidden_dims[DIM_X], transf_inout_dims[DIM_X]),
-            nn.LayerNorm(transf_inout_dims[DIM_X])
+            act_fn_in()
         )
 
         # edges encoder
         self.mlp_in_E = nn.Sequential(
             nn.Linear(self.in_dim_e, encdec_hidden_dims[DIM_E]),
-            self.act_fn(),
-            nn.Linear(encdec_hidden_dims[DIM_E], transf_inout_dims[DIM_E])
+            act_fn_in(),
+            nn.Linear(encdec_hidden_dims[DIM_E], transf_inout_dims[DIM_E]),
+            act_fn_in()
+        )
+
+        self.mlp_dist = nn.Sequential(
+            nn.Linear(1, encdec_hidden_dims[DIM_D]),
+            act_fn_in(),
+            nn.Linear(encdec_hidden_dims[DIM_D], 128),
+            nn.Tanh()
         )
         
-        # edges encoder
-        # self.mlp_in_D = nn.Sequential(
-        #     nn.Linear(distance_dim, encdec_hidden_dims[DIM_D]),
-        #     self.act_fn(),
-        #     nn.Linear(encdec_hidden_dims[DIM_D], transf_inout_dims[DIM_D])
-        # )
-        self.mlp_in_D = nn.Sequential(
-            nn.Linear(self.in_dim_d, encdec_hidden_dims[DIM_D]),
-            self.act_fn(),
-            nn.Linear(encdec_hidden_dims[DIM_D], transf_inout_dims[DIM_D])
+        self.mlp_eigen  = nn.Sequential(
+            nn.Linear(9, encdec_hidden_dims[DIM_D]),
+            act_fn_in(),
+            nn.Linear(encdec_hidden_dims[DIM_D], transf_inout_dims[DIM_X]),
+            act_fn_in()
         )
+
 
         if self.using_y:
             # global encoder
             self.mlp_in_y = nn.Sequential(
                 nn.Linear(self.in_dim_y, encdec_hidden_dims[DIM_Y]),
-                self.act_fn(),
-                nn.Linear(encdec_hidden_dims[DIM_Y], transf_inout_dims[DIM_Y])
+                act_fn_in(),
+                nn.Linear(encdec_hidden_dims[DIM_Y], transf_inout_dims[DIM_Y]),
+                act_fn_in()
             )
         else:
             self.fixed_y = nn.Parameter(torch.randn(transf_inout_dims[DIM_Y]))
 
+        if self.simpler:
+            self.mlp_in_ext_E = self.mlp_in_E
+        else:
+            self.mlp_in_ext_E = nn.Sequential(
+                nn.Linear(self.in_dim_e, encdec_hidden_dims[DIM_E]),
+                act_fn_in(),
+                nn.Linear(encdec_hidden_dims[DIM_E], transf_inout_dims[DIM_E])
+            )
+
 
         #######################  MAIN BODY: TRANSFORMER  #######################
 
+        tlayer_class = XEyTransformerLayer
+
         self.tf_layers = nn.ModuleList([
-            XEyTransformerLayer(
+            tlayer_class(
                 dx=transf_inout_dims[DIM_X],
                 de=transf_inout_dims[DIM_E],
                 dy=transf_inout_dims[DIM_Y],
-                dd=transf_inout_dims[DIM_D], # distance features have same dim as edges
+                n_head=transf_hparams['heads'],
                 dim_ffX=transf_ffn_dims[DIM_X],
                 dim_ffE=transf_ffn_dims[DIM_E],
-                dim_ffy=transf_ffn_dims[DIM_Y],
-                dim_ffD=transf_ffn_dims[DIM_D], # distance features have same dim as edges
-                last_layer=(i == num_layers - 1),
-                **transf_hparams
+                dim_ffy=transf_ffn_dims[DIM_Y]
             )
-            for i in range(num_layers)
+            for _ in range(num_layers)
         ])
 
         ##########################  OUTPUT DECODERS  ###########################
@@ -540,151 +566,137 @@ class GraphTransformerDistanceOriginal(nn.Module):
         # nodes decoder
         self.mlp_out_X = nn.Sequential(
             nn.Linear(transf_inout_dims[DIM_X], encdec_hidden_dims[DIM_X]),
-            self.act_fn(),
-            nn.Linear(encdec_hidden_dims[DIM_X], self.out_dim_x)
-        )
-        self.mlp_out_C = nn.Sequential(
-            nn.Linear(transf_inout_dims[DIM_X], encdec_hidden_dims[DIM_X]),
-            self.act_fn(),
-            nn.Linear(encdec_hidden_dims[DIM_X], self.out_dim_c)
+            act_fn_out(),
+            nn.Linear(encdec_hidden_dims[DIM_X], self.out_dim_c + self.out_dim_x)
         )
 
         # edges decoder
         self.mlp_out_E = nn.Sequential(
             nn.Linear(transf_inout_dims[DIM_E], encdec_hidden_dims[DIM_E]),
-            self.act_fn(),
+            act_fn_out(),
             nn.Linear(encdec_hidden_dims[DIM_E], self.out_dim_e)
         )
-        self.mlp_out_D = nn.Sequential(
-            nn.Linear(transf_inout_dims[DIM_D], encdec_hidden_dims[DIM_D]),
-            self.act_fn(),
-            nn.Linear(encdec_hidden_dims[DIM_D], self.out_dim_d),
-            nn.SiLU()
-        )
+
+        self.mlp_out_dist_new = nn.Sequential(
+                nn.Linear(128,64),
+                act_fn_out(),
+                nn.Linear(64, 1),
+                nn.SiLU()
+            )
 
         if self.using_y:
             # global decoder
             self.mlp_out_y = nn.Sequential(
                 nn.Linear(transf_inout_dims[DIM_Y], encdec_hidden_dims[DIM_Y]),
-                self.act_fn(),
+                act_fn_out(),
                 nn.Linear(encdec_hidden_dims[DIM_Y], self.out_dim_y)
             )
 
+        if self.simpler:
+            pass
+        else:
+            self.mlp_out_ext_E = nn.Sequential(
+                nn.Linear(transf_inout_dims[DIM_E], encdec_hidden_dims[DIM_E]),
+                act_fn_out(),
+                nn.Linear(encdec_hidden_dims[DIM_E], self.out_dim_e)
+            )
+
+
+    def get_external_nodes_dim(self):
+        return self.transf_inout_dims[DIM_X]
 
     def forward(
             self,
-            graph: DenseGraph
-        ) -> DenseGraph:
+            graph: DenseGraph,
+            ext_X: Optional[Tensor]=None,
+            ext_node_mask: Optional[Tensor]=None,
+            ext_edges: Optional[DenseEdges]=None
+        ) -> Tuple[DenseGraph, Optional[DenseEdges]]:
 
         ########################  ASSERTIONS ON INPUT  #########################
-        X, E, y, D, C = graph.x, graph.edge_adjmat, graph.y, graph.edge_dist, graph.node_charges
+        X, E, y, dist_1, c = graph.x, graph.edge_adjmat, graph.y, graph.edge_dist, graph.node_charges
 
-        assert X.shape[-1] == self.input_dims[DIM_X]
-        assert E.shape[-1] == self.input_dims[DIM_E]
-        assert y is None or y.shape[-1] == self.input_dims[DIM_Y]
-        assert C.shape[-1] == self.input_dims[DIM_C]
+        using_ext = ext_X is not None
 
-        bs, n = X.shape[0], X.shape[1]
+        bs, nq = X.shape[0], X.shape[1]
 
         ###############  SETUP SELFLOOP REMOVAL (DIAGONAL) MASK  ###############
-        
+
         node_mask = graph.node_mask.unsqueeze(-1)
         edge_mask = graph.edge_mask.unsqueeze(-1)
         triang_mask = get_edge_mask_dense(edge_mask=graph.edge_mask, only_triangular=True).unsqueeze(-1)
-        diag_mask = ~torch.eye(n, device=graph.x.device, dtype=torch.bool)
-        diag_mask = diag_mask.unsqueeze(0).unsqueeze(-1).expand(bs, -1, -1, -1)
 
-        def mask_everything(X, E, D):
+        def mask_everything(X, E, ext_E=None):
 
             X = X * node_mask
             E = E * edge_mask
-            D = D * edge_mask
-            
-            return X, E, D
+            if ext_E is not None:
+                ext_E = ext_E * ext_edges.edge_mask.unsqueeze(-1)
+
+            return X, E, ext_E
+
+        X = torch.cat((X, c), dim=-1)
+        
+        dist = dist_1[:,:,:,0].unsqueeze(-1)
+        
+        eigen = dist_1[:,:,:,1]
 
         ######################  SAVE RESIDUAL FOR LATER  #######################
         if self.use_residuals_inout:
-            X_to_out = X[..., :self.out_dim_x]
+            X_to_out = X[..., :self.out_dim_x+self.out_dim_c]
             E_to_out = E[..., :self.out_dim_e]
-            D_to_out = D  # distance is always 1-dimensional
-            C_to_out = C[..., :self.out_dim_c]
             if self.using_y:
                 y_to_out = y[..., :self.out_dim_y]
+            if using_ext:
+                ext_E_to_out = ext_E[..., :self.out_dim_e]
 
         ###########################  ENCODE INPUTS  ############################
-        # special treatment for edges (to make it symmetric (shouldn't this already be?))
-        X = self.mlp_in_X(torch.cat([X, C], dim=-1)) # concatenate nodes with charges
-        if self.encode_distances:
-            if D.ndim == 4:
-                others = D[..., 1:]
-                D = D[..., 0]
-            else:
-                others = None
-            D = self.distance_enc(D)
-            if others is not None:
-                D = torch.cat([D, others], dim=-1)
-        if D.ndim == 3:
-            D = D.unsqueeze(-1)
-        D = self.mlp_in_D(D)
-        D = (D + D.transpose(1, 2)) / 2
-        E = self.mlp_in_E(E)  # concatenate distance to edges
-        E = (E + E.transpose(1, 2)) / 2
 
+        eigen = self.mlp_eigen(eigen)
+        X = self.mlp_in_X(X)
+        E = self.mlp_in_E(E) * triang_mask
+        E = (E + E.transpose(1, 2))
+
+        dist = self.mlp_dist(dist) * triang_mask
+        dist = (dist+dist.transpose(1,2))
+        X=X+eigen
         if self.using_y:
             y = self.mlp_in_y(y)
         else:
             y = self.fixed_y.clone().expand(bs, -1)
 
+
         # mask everything before feeding to transformer
-        X, E, D = mask_everything(X, E, D)
+        X, E, ext_E = mask_everything(X, E)
 
         #######################  MAIN BODY: TRANSFORMER  #######################
 
         for layer in self.tf_layers:
-            X, E, y, D = layer(X, E, y, D, node_mask, edge_mask)
-
+                X, E, y, new_dist, node_mask = layer(X=X, E=E, y=y, edge_mask_triangular=edge_mask, pos=dist, node_mask=node_mask)
 
         ###########################  DECODE OUTPUT  ############################
-        C = self.mlp_out_C(X)
         X = self.mlp_out_X(X)
-        D = self.mlp_out_D(D).squeeze(-1)  # distance is always 1-dimensional
         E = self.mlp_out_E(E)
-        if self.using_y:
-            y = self.mlp_out_y(y)
+
+        new_dist = self.mlp_out_dist_new(new_dist) * triang_mask
 
         ###########################  FINAL RESIDUAL  ###########################
-        if self.use_residuals_inout:
-            X = X + X_to_out
-            C = C + C_to_out
-            E = E + E_to_out
-            #D = D + D_to_out
-            
+
         # remove selfloop and make symmetric
-        #E = E * triang_mask
-        E = E * diag_mask
-        E = (E + E.transpose(1, 2)) / 2
-        #E = (E + torch.transpose(E, 1, 2))
-        
-        #D = D * triang_mask.squeeze(-1)
-        sq_diag_mask = diag_mask.squeeze(-1) if D.ndim == 3 else diag_mask
-        D = D * sq_diag_mask
-        D = (D + D.transpose(1, 2)) / 2
-        #D = D + torch.transpose(D, 1, 2)
-        
-        if self.use_residuals_inout:
-            if self.using_y:
-                y = y + y_to_out
-        
+        E = E * triang_mask
+
+        E = (E + torch.transpose(E, 1, 2))
+
+        new_dist = new_dist + torch.transpose(new_dist, 1,2)
+
+        X = (X + X_to_out)
+
+        final_X = X[..., :self.out_dim_x]
+        c = X[..., self.out_dim_x:]
+
         # mask everything before returning
-        out_graph = DenseGraph(
-            x=X,
-            edge_adjmat=E,
-            y=y,
-            node_mask=graph.node_mask,
-            edge_mask=graph.edge_mask,
-            edge_dist=D,
-            node_charges=C
-        ).apply_mask()
+        out_graph = DenseGraph(x=final_X, edge_adjmat=E, y=y_to_out, node_mask=graph.node_mask, edge_mask=graph.edge_mask, edge_dist=new_dist.squeeze(-1),
+                               node_charges=c).apply_mask()
 
         ###############################  RETURN  ###############################
 
