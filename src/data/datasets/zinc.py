@@ -1,19 +1,25 @@
 from typing import Optional, Callable, Dict, List
 import os.path as osp
 
-from src.data.datasets.dig_datasets import BaseDigSmilesRaw, BaseDigResources, DEFAULT_DATASET_PATH
+from src.data.datasets.dig_datasets import BaseDigSmilesRaw, BaseDigMoleculesRaw, BaseDigResources, DEFAULT_DATASET_PATH
 
-from src.data.datasets.molecular import MolecularDataset, MolecularGraphsDataset
+from src.data.datasets.molecular import MolecularDataset, MolecularGraphsDataset, SmilesDataset
 
 DEFAULT_DATASET_PATH_ZINC_DIG = osp.join(DEFAULT_DATASET_PATH, 'zinc')
-
-class ZincSmiles(BaseDigSmilesRaw):
-
+            
+class ZincMolecules(BaseDigMoleculesRaw):
+    
     def __init__(
             self,
             root: Optional[str] = None,
             split: Optional[str] = None,
-            return_only_smiles: bool = False,
+            sanitize: bool = False,
+            remove_hydrogens: bool = False,
+            kekulize: bool = False,
+            compute_3d_conformer: bool = False,
+            properties_computer_function: Optional[Callable] = None,
+            num_workers: int = 0,
+            chunksize: Optional[int] = None,
             pre_transform=None,
             pre_filter=None
         ):
@@ -22,15 +28,20 @@ class ZincSmiles(BaseDigSmilesRaw):
             root = DEFAULT_DATASET_PATH_ZINC_DIG
 
         super().__init__(
-            root=root,
             which_dataset='zinc250k',
+            root=root,
             split=split,
-            return_only_smiles=return_only_smiles,
+            sanitize=sanitize,
+            remove_hydrogens=remove_hydrogens,
+            kekulize=kekulize,
+            compute_3d_conformer=compute_3d_conformer,
+            properties_computer_function=properties_computer_function,
+            num_workers=num_workers,
+            chunksize=chunksize,
             pre_transform=pre_transform,
-            pre_filter=pre_filter
+            pre_filter=pre_filter,
         )
-
-
+        
     def process_csv(self, header, ids, rows):
         """In Zinc, the header is as follows:
         - 1st is smiles
@@ -49,54 +60,20 @@ class ZincSmiles(BaseDigSmilesRaw):
         return struct
 
 
-class ZincMolecules(MolecularDataset):
-    
-        def __init__(
-                self,
-                root: Optional[str] = None,
-                split: Optional[str] = None,
-                sanitize: bool = True,
-                remove_hydrogens: bool = True,
-                kekulize: bool = True,
-                properties_computer_function: Optional[Callable] = None,
-                pre_transform=None,
-                pre_filter=None
-            ):
-
-            if root is None:
-                root = DEFAULT_DATASET_PATH_ZINC_DIG
-
-            raw_smiles_dataset = ZincSmiles(
-                root,
-                split=split,
-                pre_transform=pre_transform,
-                pre_filter=pre_filter
-            )
-    
-            super().__init__(
-                root=root,
-                split=split,
-                raw_smiles_dataset=raw_smiles_dataset,
-                sanitize=sanitize,
-                remove_hydrogens=remove_hydrogens,
-                kekulize=kekulize,
-                properties_computer_function=properties_computer_function
-            )
-
-
 class Zinc(MolecularGraphsDataset):
         
     def __init__(
             self,
             root: Optional[str] = None,
             split: Optional[str] = None,
-            sanitize: bool = True,
+            sanitize: bool = False,
             remove_hydrogens: bool = True,
             kekulize: bool = True,
-            hard_remove_hydrogens: bool = True,
+            hard_remove_hydrogens: bool = False,
             include_pos: bool = False,
             include_charges: bool = False,
             num_workers: int = 0,
+            chunksize: Optional[int] = None,
             properties_computer_function: Optional[Callable] = None,
             pre_transform_raw=None,
             pre_filter_raw=None,
@@ -111,7 +88,9 @@ class Zinc(MolecularGraphsDataset):
         raw_dataset = ZincMolecules(
             root=root, sanitize=sanitize,
             remove_hydrogens=remove_hydrogens, kekulize=kekulize,
+            compute_3d_conformer=include_pos,
             properties_computer_function=properties_computer_function,
+            num_workers=num_workers, chunksize=chunksize,
             pre_transform=pre_transform_raw, pre_filter=pre_filter_raw
         )
 
@@ -122,7 +101,45 @@ class Zinc(MolecularGraphsDataset):
             hard_remove_hydrogens=hard_remove_hydrogens,
             include_pos=include_pos, include_charges=include_charges,
             transform=transform, pre_transform=pre_transform, pre_filter=pre_filter,
-            num_workers=num_workers
+            num_workers=num_workers, chunksize=chunksize
+        )
+
+
+class ZincSmiles(SmilesDataset):
+
+    def __init__(
+            self,
+            root: Optional[str] = None,
+            split: Optional[str] = None,
+            sanitize: bool = True,
+            remove_hydrogens: bool = True,
+            kekulize: bool = True,
+            include_pos: bool = False,
+            properties_computer_function: Optional[Callable] = None,
+            num_workers: int = 0,
+            chunksize: Optional[int] = None,
+            pre_transform_raw=None,
+            pre_filter_raw=None,
+            pre_transform=None,
+            pre_filter=None
+        ):
+
+        if root is None:
+            root = DEFAULT_DATASET_PATH_ZINC_DIG
+            
+        # create raw dataset
+        raw_dataset = ZincMolecules(
+            root=root, sanitize=sanitize,
+            remove_hydrogens=remove_hydrogens, kekulize=kekulize,
+            compute_3d_conformer=include_pos,
+            properties_computer_function=properties_computer_function,
+            num_workers=num_workers, chunksize=chunksize,
+            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw
+        )
+
+        super().__init__(
+            root, split=split, raw_mol_dataset=raw_dataset,
+            pre_transform=pre_transform, pre_filter=pre_filter
         )
 
 
@@ -135,13 +152,14 @@ class ZincResources(BaseDigResources):
             self,
             random_splits: Dict,
             root: Optional[str] = None,
-            sanitize: bool = True,
+            sanitize: bool = False,
             remove_hydrogens: bool = True,
             kekulize: bool = True,
-            hard_remove_hydrogens: bool = True,
+            hard_remove_hydrogens: bool = False,
             include_pos: bool = False,
             include_charges: bool = False,
             num_workers: int = 0,
+            chunksize: Optional[int] = None,
             pre_transform=None,
             pre_filter=None,
             pre_transform_raw=None,
@@ -156,10 +174,18 @@ class ZincResources(BaseDigResources):
             'include_pos': include_pos,
             'include_charges': include_charges,
             'num_workers': num_workers,
+            'chunksize': chunksize,
             'pre_transform_raw': pre_transform_raw,
             'pre_filter_raw': pre_filter_raw,
         }
-        smiles_cfg = {} # here in case this is needed in the future
+        smiles_cfg = {
+            'sanitize': sanitize,
+            'remove_hydrogens': remove_hydrogens,
+            'kekulize': kekulize,
+            'include_pos': include_pos,
+            'pre_transform_raw': pre_transform_raw,
+            'pre_filter_raw': pre_filter_raw
+        }
 
         super().__init__(
             root=root,

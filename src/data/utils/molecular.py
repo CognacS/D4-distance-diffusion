@@ -2,6 +2,7 @@ from typing import List
 from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem
 from rdkit.Chem.rdchem import BondType as bt
+from tqdm import tqdm
 
 from src.data.simple_transforms.molecular import BOND_TYPES_REAL_REV, BOND_TYPES_REV
 
@@ -72,7 +73,7 @@ def get_molecule_stats(mols: List[Chem.Mol]):
     l_num_atoms = []
     l_num_bonds = []
 
-    for mol in mols:
+    for mol in tqdm(mols, desc='Computing molecules stats'):
         l_num_atoms.append(mol.GetNumAtoms())
         l_num_bonds.append(mol.GetNumBonds())
 

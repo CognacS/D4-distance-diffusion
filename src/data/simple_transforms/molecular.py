@@ -41,13 +41,26 @@ def mol2smiles(mol, sanitize=False, isomeric=False):
     return smiles
 
 @batched
-def smiles2mol(smiles, sanitize=True, remove_hydrogens=False, kekulize=False):
+def smiles2mol(smiles, sanitize=False, remove_hydrogens=False, kekulize=False):
     mol = Chem.MolFromSmiles(smiles, sanitize=sanitize)
     if mol is not None:
         if remove_hydrogens:
             mol = Chem.RemoveHs(mol)
         if kekulize:
             Chem.Kekulize(mol)
+    return mol
+
+@batched
+def mol2mol(mol, sanitize=False, remove_hydrogens=False, kekulize=False):
+    if sanitize:
+        try:
+            Chem.SanitizeMol(mol)
+        except ValueError:
+            return None
+    if remove_hydrogens:
+        mol = Chem.RemoveHs(mol)
+    if kekulize:
+        Chem.Kekulize(mol)
     return mol
 
 
@@ -77,6 +90,29 @@ def mol2nx(mol):
 
 def pos_from_dist_rdkit(dist_matrix):
     return DistanceGeometry.DistGeom.EmbedBoundsMatrix(dist_matrix.double().numpy())
+
+
+def verify_and_compute_3d_conformer(mol: Chem.Mol) -> Chem.Mol:
+    if mol.GetNumConformers() == 0:
+        # compute positions from the molecule itself
+        try:
+            # get molecule
+            mol = Chem.AddHs(mol) # add hydrogens for better optimization
+            AllChem.EmbedMolecule(mol, randomSeed=42, useRandomCoords=True)
+            AllChem.UFFOptimizeMolecule(mol)
+            params = AllChem.ETKDGv3()
+            params.randomSeed = 0xf00d
+            mol = Chem.RemoveHs(mol)
+            # at this point the molecule has a conformer
+            # running mol.GetNumConformers() should return 1
+            
+        except Exception as e:
+            print(f"Could not compute a conformer for {mol2smiles(mol)}: {e}")
+            return None
+    
+    return mol
+
+
 
 def get_pos_from_mol(mol: Chem.Mol) -> Optional[Tensor]:
     if mol.GetNumConformers() > 0:
@@ -221,6 +257,9 @@ def build_graph_from_molecule(
         
     if include_pos:
         pos = get_pos_from_mol(mol)
+        # if the method fails, return None, as the molecule is not usable
+        if pos is None:
+            return None
         
     if include_charges:
         charges = [charge_encoder[atom.GetFormalCharge()] for atom in mol.GetAtoms()]

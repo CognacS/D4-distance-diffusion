@@ -1,5 +1,6 @@
-from typing import List, Optional, Tuple, Dict, Any, Type, Union
+from typing import List, Optional, Tuple, Dict, Any, Type, Union, Callable
 from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
 from collections import OrderedDict
 
 import os
@@ -7,11 +8,14 @@ import os.path as osp
 
 from src.data.datasets.core import RawDataset, DatasetException, DataResources, DEFAULT_DATASET_PATH
 from src.data.datasets.split import split_dataset, random_split_dataset
+from src.data.datasets.molecular import ExtendedMolecularDatasetRaw
 
 from torch_geometric.data import download_url
 from torch_geometric.io.fs import makedirs
 
 import src.data.utils.csv as csvutils
+import src.data.utils.molecular as molutils
+from src.data.simple_transforms.molecular import smiles2mol, verify_and_compute_3d_conformer
 
 from copy import copy
 
@@ -118,6 +122,22 @@ class BaseDigSmilesRaw(RawDataset):
             self.smiles, self.props = ret
         else:
             self.smiles, self.props = ret, []
+            
+        # apply pre_transform and pre_filter if any
+        if self.pre_transform is not None or self.pre_filter is not None:
+            
+            new_smiles = []
+            new_props = []
+            
+            for i, s in enumerate(tqdm(self.smiles), desc='Applying pre_filter and pre_transform to SMILES'):
+                if self.pre_filter is not None and not self.pre_filter(s, i):
+                    continue
+                if self.pre_transform is not None:
+                    s = self.pre_transform(s)
+                
+                new_smiles.append(s)
+                if len(self.props) > 0:
+                    new_props.append(self.props[i])
 
         self.save(self.smiles, self.raw_paths[0])
         self.save(self.props, self.raw_paths[1])
@@ -133,6 +153,135 @@ class BaseDigSmilesRaw(RawDataset):
             s = self.smiles[idx]
             p = self.props[idx] if len(self.props) > 0 else OrderedDict()
             return s, p
+
+        
+class BaseDigMoleculesRaw(ExtendedMolecularDatasetRaw):
+
+    def __init__(
+            self,
+            which_dataset: str,
+            root: Optional[str] = None,
+            split: Optional[str] = None,
+            sanitize: bool = False,
+            remove_hydrogens: bool = False,
+            kekulize: bool = False,
+            compute_3d_conformer: bool = False,
+            properties_computer_function: Optional[Callable] = None,
+            num_workers: int = 0,
+            chunksize: Optional[int] = None,
+            pre_transform=None,
+            pre_filter=None
+        ):
+
+        if which_dataset not in SUPPORTED_DATASETS:
+            raise ValueError(f'Dataset {which_dataset} not supported. Supported datasets are: {SUPPORTED_DATASETS}')
+        self.which_dataset = which_dataset
+
+        if root is None:
+            root = osp.join(DEFAULT_DATASET_PATH, which_dataset + '-dig')
+
+        super().__init__(
+            root=root, split=split, sanitize=sanitize,
+            remove_hydrogens=remove_hydrogens, kekulize=kekulize,
+            compute_3d_conformer=compute_3d_conformer,
+            properties_computer_function=properties_computer_function,
+            num_workers=num_workers, chunksize=chunksize,
+            pre_transform=pre_transform, pre_filter=pre_filter
+        )
+        
+        self.load_data(
+            mols_path=self.raw_paths[0],
+            props_path=self.raw_paths[1],
+            stats_path=self.raw_paths[3]
+        )
+
+
+    def subset_from(self, indices: List[int], name: str):
+        """Create a subset of the dataset with the indices provided, at the folder
+        name provided. This is useful for splitting the dataset into train, test, and validation
+        """
+        
+        return super().subset_from(
+            indices, name,
+            mols_path=self.raw_paths[0],
+            props_path=self.raw_paths[1],
+            stats_path=self.raw_paths[3]
+        )
+
+    
+    @property
+    def raw_file_names(self):
+        return ['mols.pkl', 'props_mols.json', 'test_idx.json', 'stats.json']
+    
+    @property
+    def other_file_names(self):
+        l = super().other_file_names
+        return l + [self.which_dataset + '.csv']
+    
+
+    def process_csv(self, header: List[str], ids: List[int], rows: List[OrderedDict]) -> Tuple[List[str], List[float]]|List[str]:
+        # this method should return either:
+        # - a tuple with a list of smiles and a list of properties
+        # - a list of smiles (if no properties are available)
+        raise NotImplementedError('This method should be implemented in the subclass')
+    
+    def process_test_indices (self, struct: Any) -> List[int]:
+        # this method should return a list of ints from the provided structure
+        raise NotImplementedError('This method should be implemented in the subclass')
+
+
+    def get_test_indices(self) -> List[int]:
+        struct = self.load(self.raw_paths[2])
+        return self.process_test_indices(struct)
+
+
+    def download(self):
+        # download smiles file
+        smiles_url = DIG_RAW_REPO_URL + self.which_dataset + '.csv'
+        smiles_file = download_url(smiles_url, self.raw_dir)
+
+        # download test split indices
+        test_idx_url = DIG_RAW_REPO_URL + 'valid_idx_' + self.which_dataset + '.json'
+        test_idx_file = download_url(test_idx_url, self.raw_dir)
+
+        # rename index file to make it general
+        test_idx_file_new = osp.join(self.raw_dir, 'test_idx.json')
+        if not osp.exists(test_idx_file_new):
+            os.rename(test_idx_file, test_idx_file_new)
+
+        # read smiles csv file
+        header, ids, rows = csvutils.read_csv_with_header_and_index(smiles_file)
+
+        # process csv file - should be implemented in the subclass
+        ret = self.process_csv(header, ids, rows)
+
+        # if properties are available, unpack them
+        if isinstance(ret, tuple):
+            smiles, props = ret
+        else:
+            smiles = ret
+            props = [OrderedDict() for _ in range(len(self.smiles))]
+            
+            
+        # append test flag before filtering
+        test_indices = self.get_test_indices()
+        new_props = []
+        for i, p in enumerate(props):
+            new_props.append(OrderedDict({'is_test': int(i in test_indices), **p}))
+
+        # preprocess molecules (in parallel if num_workers > 0)
+        self.mols, self.props = self.preprocess_molecules(
+            smiles, new_props, mols_path=self.raw_paths[0], props_path=self.raw_paths[1]
+        )
+
+        # get statistics
+        self.stats = molutils.get_molecule_stats(self.mols)
+        self.atom_types = self.stats['atom_types']
+        self.bond_types = self.stats['bond_types']
+        self.charges = self.stats['charges']
+        
+        # store data in files
+        self.save(self.stats, self.raw_paths[3])
         
 
 
@@ -148,12 +297,16 @@ class BaseDigResources(DataResources):
             root: Optional[str] = None,
             pre_transform=None,
             pre_filter=None,
+            pre_transform_raw=None,
+            pre_filter_raw=None
         ):
         super().__init__()
         
         self.root = root
         
         self.dataset_cfg = dataset_cfg
+        self.dataset_cfg['pre_transform_raw'] = pre_transform_raw
+        self.dataset_cfg['pre_filter_raw'] = pre_filter_raw
         self.smiles_cfg = smiles_cfg
         self.random_splits = random_splits
 
@@ -206,7 +359,8 @@ class BaseDigResources(DataResources):
                 print('Applying preprocessing to the whole dataset')
                 ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
 
-            test_indices = ds_smiles.get_test_indices()
+            # test indices should be first property
+            test_indices = ds.y[...,0].nonzero(as_tuple=True)[0].tolist()
             other_indices = [i for i in range(len(ds)) if i not in test_indices]
 
             dss_train_test = split_dataset(

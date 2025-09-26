@@ -16,7 +16,7 @@ from torch_geometric.io.fs import makedirs
 from torch_geometric.datasets.qm9 import conversion
 
 from src.data.datasets.core import RawDataset, DataResources, DatasetException, DEFAULT_DATASET_PATH, DEFAULT_SPLITS
-from src.data.datasets.molecular import MolecularGraphsDataset, SmilesDataset, MolecularDataset
+from src.data.datasets.molecular import MolecularGraphsDataset, SmilesDataset, ExtendedMolecularDatasetRaw
 
 from copy import copy
 
@@ -30,36 +30,7 @@ GDB13_RAW_SMI = 'gdb13.rand1M.smi'
 DEFAULT_DATASET_PATH_GDB13 = osp.join(DEFAULT_DATASET_PATH, 'gdb13')
 
 
-class RawProcWorker:
-    
-    def __init__(self, kekulize: bool = True, pre_filter: Optional[Callable] = None):
-        self.kekulize = kekulize
-        self.pre_filter = pre_filter
-    
-    
-    def __call__(self, mol: Chem.Mol) -> tuple:
-        
-        try:
-
-            if mol is None:     # skip if molecule is None (e.g., sanitization failed)
-                skipped_sanitization += 1
-                return (None, 'sanitization failed')
-
-            if self.kekulize:
-                mol = molutils.kekulize_molecule(mol)
-                
-            if self.pre_filter is not None and not self.pre_filter(mol):
-                skipped_prefilter += 1
-                return (None, 'pre-filter failed')
-
-            return (mol, None)
-        
-        except Exception as e:
-            # print(f'Error processing molecule: {e}')
-            return (None, str(e))
-
-
-class GDB13Raw(RawDataset):
+class GDB13Raw(ExtendedMolecularDatasetRaw):
     """ GDB13 dataset class for raw data.
     """
 
@@ -67,69 +38,53 @@ class GDB13Raw(RawDataset):
             self,
             root: Optional[str] = None,
             split: Optional[str] = None,
-            sanitize: bool = True,
-            remove_hydrogens: bool = True,
-            kekulize: bool = True,
-            subset_size: Optional[int] = None,
-            num_workers: int = 1,
+            sanitize: bool = False,
+            remove_hydrogens: bool = False,
+            kekulize: bool = False,
+            compute_3d_conformer: bool = False,
+            properties_computer_function: Optional[Callable] = None,
+            num_workers: int = 0,
+            chunksize: Optional[int] = None,
             pre_transform=None,
             pre_filter=None
         ):
-        
-        self.sanitize = sanitize
-        self.remove_hydrogens = remove_hydrogens
-        self.kekulize = kekulize
-        self.subset_size = subset_size
-        self.num_workers = num_workers
 
         if root is None:
             root = DEFAULT_DATASET_PATH_GDB13
 
-        super().__init__(root, split=split, pre_transform=pre_transform, pre_filter=pre_filter)
-
-        if not hasattr(self, 'mols'):
-            self.mols = self.load(self.raw_paths[0])
-            self.stats = self.load(self.raw_paths[1])
-            self.atom_types = self.stats['atom_types']
-            self.bond_types = self.stats['bond_types']
-            self.charges = self.stats['charges'] if 'charges' in self.stats else None
-
-
-    def subset_from(self, indices: List[int], name: str) -> Dataset:
+        super().__init__(
+            root=root, split=split, sanitize=sanitize,
+            remove_hydrogens=remove_hydrogens, kekulize=kekulize,
+            compute_3d_conformer=compute_3d_conformer,
+            properties_computer_function=properties_computer_function,
+            num_workers=num_workers, chunksize=chunksize,
+            pre_transform=pre_transform, pre_filter=pre_filter
+        )
+        
+        self.load_data(
+            mols_path=self.raw_paths[0],
+            props_path=self.raw_paths[1],
+            stats_path=self.raw_paths[2]
+        )
+        
+    def subset_from(self, indices: List[int], name: str):
         """Create a subset of the dataset with the indices provided, at the folder
         name provided. This is useful for splitting the dataset into train, test, and validation
         """
-
-        subset = copy(self)
-        subset.root = self.root
-        subset.split = name
-        makedirs(subset.raw_dir)
-        subset.mols = [self.mols[i] for i in indices]
-
-        # save data
-        subset.save(subset.mols, subset.raw_paths[0])
-
-        # get statistics
-        stats_new = molutils.get_molecule_stats(subset.mols)
-        stats_new['atom_types'] = self.atom_types # use old atom types
-        stats_new['bond_types'] = self.bond_types # use old bond types
-        stats_new['charges'] = self.charges # use old charges
-        subset.stats = stats_new
-        subset.atom_types = self.atom_types
-        subset.bond_types = self.bond_types
-        subset.charges = self.charges
         
-        # store data in files
-        subset.save(subset.stats, subset.raw_paths[1])
-
-        return subset
+        return super().subset_from(
+            indices, name,
+            mols_path=self.raw_paths[0],
+            props_path=self.raw_paths[1],
+            stats_path=self.raw_paths[2]
+        )
 
     
     @property
     def raw_file_names(self):
-        return ['mols.pkl', 'stats.json']
-    
-    
+        return ['mols.pkl', 'props.json', 'stats.json']
+
+
     def download(self):
         # download gz file
         gz_file = download_url(GDB13_DATA_URL, self.raw_dir)
@@ -139,32 +94,13 @@ class GDB13Raw(RawDataset):
         smiles_file = osp.join(self.raw_dir, GDB13_RAW_SMI)
 
         # read smiles
-        self.mols = molutils.read_molecules(smiles_file, self.sanitize, self.remove_hydrogens)
+        smiles = molutils.read_molecules(smiles_file, self.sanitize, self.remove_hydrogens)
+        smiles = [s for s in tqdm(smiles, desc='Reading SMILES') if s is not None]
+        props = [OrderedDict()] * len(smiles)  # no starting properties available
         
-        # last round of processing
-        self.mols = self._prepare_data(self.mols)
-
-        # filter data if needed
-        # if self.pre_filter is not None:
-        #     len_before = len(self.mols)
-        #     self.mols = [d for d in self.mols if self.pre_filter(d)]
-        #     len_after = len(self.mols)
-        #     if len_after < len_before:
-        #         print(f'Filtered {len_before - len_after} molecules from GDB13 dataset using pre_filter')
-            
-        if self.subset_size is not None:
-            # shuffle mols
-            import random
-            random.shuffle(self.mols)
-            # take only the first subset_size molecules
-            self.mols = self.mols[:self.subset_size]
-
-        # apply pre_transform if needed
-        if self.pre_transform is not None:
-            self.mols = [self.pre_transform(d) for d in self.mols]
-
-        # save data
-        self.save(self.mols, self.raw_paths[0])
+        self.mols, self.props = self.preprocess_molecules(
+            smiles, props, mols_path=self.raw_paths[0], props_path=self.raw_paths[1]
+        )
 
         # get statistics
         self.stats = molutils.get_molecule_stats(self.mols)
@@ -173,49 +109,8 @@ class GDB13Raw(RawDataset):
         self.charges = self.stats['charges']
         
         # store data in files
-        self.save(self.stats, self.raw_paths[1])
-        
+        self.save(self.stats, self.raw_paths[2])
 
-        
-    def _prepare_data(self, mols):
-        
-        mols = [mol for mol in mols]
-        
-        chunksize = (len(mols) // self.num_workers // 20) if self.num_workers > 0 else len(mols)
-        
-        results = process_map(RawProcWorker(kekulize=self.kekulize, pre_filter=self.pre_filter),
-                mols, max_workers=self.num_workers, desc='Processing molecules', chunksize=chunksize)
-        
-        skipped_sanitization = 0
-        skipped_prefilter = 0
-        errors = []
-        def select_valid_mols(result):
-            mol, error = result
-            if mol is None:
-                if error == 'sanitization failed':
-                    skipped_sanitization += 1
-                elif error == 'pre-filter failed':
-                    skipped_prefilter += 1
-                else:
-                    errors.append(error)
-                return False
-            return True
-        
-        final_mols = [mol for mol, error in results if select_valid_mols((mol, error))]
-        
-        print(f'Sanitization skipped {skipped_sanitization} molecules')
-        print(f'Pre-filter skipped {skipped_prefilter} molecules')
-        print(f'Errors:', errors)
-            
-        return final_mols
-
-
-    def __len__(self):
-        return len(self.mols)
-        
-    def __getitem__(self, idx):
-        return self.mols[idx]
-    
 
 class GDB13(MolecularGraphsDataset):
 
@@ -227,10 +122,11 @@ class GDB13(MolecularGraphsDataset):
             remove_hydrogens: bool = True,
             kekulize: bool = True,
             hard_remove_hydrogens: bool = False,
-            subset_size: Optional[int] = None,
             include_pos: bool = False,
             include_charges: bool = False,
             num_workers: int = 0,
+            chunksize: Optional[int] = None,
+            properties_computer_function: Optional[Callable] = None,
             pre_transform_raw=None,
             pre_filter_raw=None,
             transform=None,
@@ -243,9 +139,12 @@ class GDB13(MolecularGraphsDataset):
 
         # create raw dataset
         raw_dataset = GDB13Raw(
-            root, sanitize=sanitize,
-            remove_hydrogens=remove_hydrogens, kekulize=kekulize, subset_size=subset_size,
-            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw, num_workers=num_workers
+            root=root, sanitize=sanitize,
+            remove_hydrogens=remove_hydrogens, kekulize=kekulize,
+            compute_3d_conformer=include_pos,
+            properties_computer_function=properties_computer_function,
+            num_workers=num_workers, chunksize=chunksize,
+            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw
         )
 
         super().__init__(
@@ -255,7 +154,7 @@ class GDB13(MolecularGraphsDataset):
             hard_remove_hydrogens=hard_remove_hydrogens,
             include_pos=include_pos, include_charges=include_charges,
             transform=transform, pre_transform=pre_transform, pre_filter=pre_filter,
-            num_workers=num_workers
+            num_workers=num_workers, chunksize=chunksize
         )
 
 class GDB13Smiles(SmilesDataset):
@@ -264,10 +163,13 @@ class GDB13Smiles(SmilesDataset):
             self,
             root: Optional[str] = None,
             split: Optional[str] = None,
-            sanitize: bool = False,
+            sanitize: bool = True,
             remove_hydrogens: bool = True,
             kekulize: bool = True,
-            subset_size: Optional[int] = None,
+            include_pos: bool = False,
+            properties_computer_function: Optional[Callable] = None,
+            num_workers: int = 0,
+            chunksize: Optional[int] = None,
             pre_transform_raw=None,
             pre_filter_raw=None,
             pre_transform=None,
@@ -279,8 +181,11 @@ class GDB13Smiles(SmilesDataset):
 
         # create raw dataset
         raw_dataset = GDB13Raw(
-            root, sanitize=sanitize,
-            remove_hydrogens=remove_hydrogens, kekulize=kekulize, subset_size=subset_size,
+            root=root, sanitize=sanitize,
+            remove_hydrogens=remove_hydrogens, kekulize=kekulize,
+            compute_3d_conformer=include_pos,
+            properties_computer_function=properties_computer_function,
+            num_workers=num_workers, chunksize=chunksize,
             pre_transform=pre_transform_raw, pre_filter=pre_filter_raw
         )
 
@@ -304,10 +209,10 @@ class GDB13Resources(DataResources):
             remove_hydrogens: bool = True,
             kekulize: bool = True,
             hard_remove_hydrogens: bool = False,
-            subset_size: Optional[int] = None,
             include_pos: bool = False,
             include_charges: bool = False,
             num_workers: int = 0,
+            chunksize: Optional[int] = None,
             pre_transform=None,
             pre_filter=None,
             pre_transform_raw=None,
@@ -323,10 +228,10 @@ class GDB13Resources(DataResources):
             'remove_hydrogens': remove_hydrogens,
             'kekulize': kekulize,
             'hard_remove_hydrogens': hard_remove_hydrogens,
-            'subset_size': subset_size,
             'include_pos': include_pos,
             'include_charges': include_charges,
-            'num_workers': num_workers,  # default to 1 worker, can be changed later
+            'num_workers': num_workers,
+            'chunksize': chunksize,
             'pre_transform_raw': pre_transform_raw,
             'pre_filter_raw': pre_filter_raw
         }
@@ -334,7 +239,7 @@ class GDB13Resources(DataResources):
             'sanitize': sanitize,
             'remove_hydrogens': remove_hydrogens,
             'kekulize': kekulize,
-            'subset_size': subset_size,
+            'pre_transform_raw': pre_transform_raw,
             'pre_filter_raw': pre_filter_raw
         }
 
