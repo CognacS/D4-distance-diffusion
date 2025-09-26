@@ -11,3 +11,5 @@ from .zinc import *
 from .qm9_dig import *
 # GDB13
 from .gdb13 import *
+# GEOM-DRUGS
+from .geom_drugs import *
