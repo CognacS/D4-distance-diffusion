@@ -1,0 +1,19 @@
+# @package _global_
+defaults:
+ - ./base
+
+method:
+    model:
+        params:
+            denoising:
+                distance_output_mode: conditional
+                loss:
+                    lambda_eigenvalues_regularization: 0.0
+
+
+config_name: qm9-d4-no-eig-reg
+
+
+mode: train+eval
+compile: false
+seed: 0
