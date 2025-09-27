@@ -15,5 +15,5 @@ config_name: qm9-d4-no-conditional
 
 
 mode: train+eval
-compile: false
+compile: true
 seed: 0

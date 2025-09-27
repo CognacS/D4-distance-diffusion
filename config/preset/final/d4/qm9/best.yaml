@@ -16,5 +16,5 @@ config_name: qm9-d4-yesgradclip-lambda_d4
 
 
 mode: train+eval
-compile: false
+compile: true
 seed: 0

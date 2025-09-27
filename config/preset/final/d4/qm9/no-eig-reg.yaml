@@ -15,5 +15,5 @@ config_name: qm9-d4-no-eig-reg
 
 
 mode: train+eval
-compile: false
+compile: true
 seed: 0
