@@ -154,7 +154,7 @@ class GDB13(MolecularGraphsDataset):
             hard_remove_hydrogens=hard_remove_hydrogens,
             include_pos=include_pos, include_charges=include_charges,
             transform=transform, pre_transform=pre_transform, pre_filter=pre_filter,
-            num_workers=num_workers, chunksize=chunksize
+            #num_workers=num_workers, chunksize=chunksize
         )
 
 class GDB13Smiles(SmilesDataset):
