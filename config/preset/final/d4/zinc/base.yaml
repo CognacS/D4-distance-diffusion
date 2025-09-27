@@ -1,8 +1,8 @@
 # @package _global_
 defaults:
  - ../base
- - override /task: qm9_3d
- - override /method/trainer: molecular_trainer
+ - override /task: zinc_3d
+ - override /method/trainer: molecular_trainer_zinc
  - override /method/dataloader: [base_dataloader, batch_1536, workers_8]
  - override /method/callbacks: ckpt_ema_dist
 
@@ -17,8 +17,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: qm9-d4
+        group: zinc-d4
 
+config_name: zinc-d4
 
 mode: train+eval
 compile: true
