@@ -4,7 +4,7 @@ defaults:
  - override /logger: wandb
  - override /method: midi
  - override /method/trainer: molecular_trainer_gdb13
- - override /method/dataloader: [base_dataloader, batch_3072, workers_8]
+ - override /method/dataloader: [base_dataloader, batch_2048, workers_8]
  - override /method/callbacks: ckpt_orig_midi
 
 method:
@@ -22,7 +22,7 @@ method:
                     num_final_sampling: 5
                 train:
                     n_epochs: 1000
-                    batch_size: 1024
+                    batch_size: 2048
                     save_model: True
                     num_workers: 4
                     lr: 0.0001
@@ -39,7 +39,7 @@ method:
                     remove_h: True
                     pin_memory: True
             validation:
-                how_many_to_generate: 1024
+                how_many_to_generate: 2048
 
 logger:
     WandbLogger:
