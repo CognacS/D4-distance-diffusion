@@ -1,0 +1,6 @@
+train:
+    batch_size: 2304
+valid:
+    batch_size: 2304
+test:
+    batch_size: 2304

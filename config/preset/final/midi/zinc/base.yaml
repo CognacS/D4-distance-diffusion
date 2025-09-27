@@ -4,7 +4,7 @@ defaults:
  - override /logger: wandb
  - override /method: midi
  - override /method/trainer: molecular_trainer_zinc
- - override /method/dataloader: [base_dataloader, batch_1536, workers_8]
+ - override /method/dataloader: [base_dataloader, batch_512, workers_8]
  - override /method/callbacks: ckpt_orig_midi
 
 method:
