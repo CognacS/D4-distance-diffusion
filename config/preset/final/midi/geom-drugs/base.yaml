@@ -40,16 +40,13 @@ method:
                     pin_memory: True
             validation:
                 how_many_to_generate: 1024
-    trainer:
-        log_every_n_steps: 400
-        check_val_every_n_epoch: 10
 
 logger:
     WandbLogger:
         project: d4-hparams
-        group: qm9-midi
+        group: geom-drugs-midi
 
-config_name: qm9-midi
+config_name: geom-drugs-midi
 
 seed: 0
 

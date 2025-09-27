@@ -4,7 +4,7 @@ defaults:
  - override /logger: wandb
  - override /method: midi
  - override /method/trainer: molecular_trainer_zinc
- - override /method/dataloader: [base_dataloader, batch_512, workers_8]
+ - override /method/dataloader: [base_dataloader, batch_384, workers_8]
  - override /method/callbacks: ckpt_orig_midi
 
 method:
@@ -22,7 +22,7 @@ method:
                     num_final_sampling: 5
                 train:
                     n_epochs: 1000
-                    batch_size: 1024
+                    batch_size: 384
                     save_model: True
                     num_workers: 4
                     lr: 0.0001
@@ -39,17 +39,14 @@ method:
                     remove_h: True
                     pin_memory: True
             validation:
-                how_many_to_generate: 1024
-    trainer:
-        log_every_n_steps: 400
-        check_val_every_n_epoch: 10
+                how_many_to_generate: 384
 
 logger:
     WandbLogger:
         project: d4-hparams
-        group: qm9-midi
+        group: zinc-midi
 
-config_name: qm9-midi
+config_name: zinc-midi
 
 seed: 0
 

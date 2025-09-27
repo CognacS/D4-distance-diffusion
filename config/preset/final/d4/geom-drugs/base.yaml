@@ -10,9 +10,9 @@ method:
     model:
         params:
             generation:
-                batch_size: 1024
+                batch_size: 1536
             validation:
-                how_many_to_generate: 1024
+                how_many_to_generate: 1536
 
 logger:
     WandbLogger:
