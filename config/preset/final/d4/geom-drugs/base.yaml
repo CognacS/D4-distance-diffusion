@@ -22,5 +22,5 @@ logger:
 config_name: geom-drugs-d4
 
 mode: train+eval
-compile: true
+compile: false
 seed: 0
