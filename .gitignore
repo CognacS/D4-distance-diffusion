@@ -182,3 +182,5 @@ metrics_spikes/
 *orca
 !*orca/
 *graphops_c.c
+
+/kdes*/
