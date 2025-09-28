@@ -235,7 +235,9 @@ class RunContext:
             kwargs = {}
             if 'how_many' in self.cfg:
                 kwargs['how_many'] = self.cfg['how_many']
-            graphs = self.generate(**kwargs)
+            if 'decode' in self.cfg:
+                kwargs['decode'] = self.cfg['decode']
+            graphs = self.generate(ckpt='best', **kwargs)
             ######## store graphs ########
             kwargs = {}
             if 'gen_path' in self.cfg:
@@ -299,12 +301,14 @@ class RunContext:
             datamodule = 	self.datamodule,
             ckpt_path =		ckpt
         )
-    def generate(self, ckpt='last', how_many=128):
+    def generate(self, ckpt='last', how_many=128, decode=True):
         self.load_checkpoint(ckpt)
-        self.model.to(self.trainer.device)
+        self.model.to(self.trainer.strategy.root_device)
         graphs = self.model.sample(how_many)
-        decoder = self.data_resources.get('decoder')
-        return decoder(graphs)
+        if decode:
+            decoder = self.data_resources.get('decoder')
+            graphs = decoder(graphs)
+        return graphs
 
 
 
@@ -331,7 +335,7 @@ class RunContext:
     def store_graphs(self, graphs: List, path: str=None):
         if path is None:
             # store graphs with date and time in name
-            filename = f'generated_graphs_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pkl'
+            filename = f'generated_graphs_N={str(len(graphs))}_D={datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pkl'
             path = self.run_directory / filename
         # store graphs using pickle
         with open(path, 'wb') as f:
@@ -344,14 +348,24 @@ class RunContext:
             self.logger.warning(f'Checkpointing is disabled, skipping...')
             return
         
-        if checkpoint_name is None:
-            checkpoint_name = 'last'
+        if checkpoint_name is None or checkpoint_name == 'best':
+            best_filename = self.find_best_epoch(self.run_directory)
+                
+            if best_filename is not None:
+                self.logger.warning(f'Found checkpoint {best_filename}, evaluating it...')
+                checkpoint_name = best_filename
+            else:
+                self.logger.warning(f'No best checkpoint found, evaluating last checkpoint...')
+                checkpoint_name = 'last.ckpt'
+
+        filepath = str(self.run_directory / checkpoint_name)
+
         if not checkpoint_name.endswith('.ckpt'):
             checkpoint_name += '.ckpt'
 
         self.logger.info(f'Loading checkpoint {checkpoint_name}...')
 
-        self.model = self._load_checkpoint(str(self.run_directory / checkpoint_name), strict)
+        self.model = self._load_checkpoint(filepath, strict)
 
         self.logger.info(f'Succesfully loaded checkpoint {checkpoint_name}')
 
