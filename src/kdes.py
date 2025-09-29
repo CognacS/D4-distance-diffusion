@@ -1,3 +1,4 @@
+import json
 from torch_geometric.utils import to_dense_adj
 import torch
 import numpy as np
@@ -6,6 +7,8 @@ from scipy.stats import gaussian_kde
 import pandas as pd
 import pickle
 import os
+
+from collections import Counter
 
 
 def compute_dists_types(data):
@@ -21,7 +24,9 @@ def compute_dists_types(data):
     dists = dists[triang_matrix]
     types = types[0][triang_matrix]
     
-    return (dists, types)
+    atom_types = data.x if data.x.ndim == 1 else data.x.argmax(dim=-1)
+    
+    return (dists, types, atom_types)
 
 
 def compute_kde(data, **kwargs):
@@ -30,6 +35,16 @@ def compute_kde(data, **kwargs):
     x_vals = np.linspace(min(data)-1, max(data)+1, 200)
     y_vals = kde(x_vals)
     return x_vals, y_vals
+
+def compute_distribution_per_type(data, remove_no_edge=False):
+    unique, counts = np.unique(data, return_counts=True)
+    counts = dict(zip(unique.tolist(), counts.tolist()))
+    if remove_no_edge and 0 in counts:
+        del counts[0]
+    total = sum(counts.values())
+    counts = {k: v/total for k, v in counts.items()}
+    
+    return counts
 
 
 def create_values_and_kde(data, kde_kwargs=None):
@@ -40,16 +55,25 @@ def create_values_and_kde(data, kde_kwargs=None):
     if kde_kwargs is None:
         kde_kwargs = {}
     dists_types = [compute_dists_types(g) for g in data]
-    dists, types = zip(*dists_types)
+    dists, types, atom_types = zip(*dists_types)
     all_dists = np.concatenate([d.numpy().flatten() for d in dists])
     all_types = np.concatenate([t.numpy().flatten() for t in types])
+    all_atom_types = np.concatenate([a.numpy().flatten() for a in atom_types])
     unique_types = np.unique(all_types)
     values_and_kdes = {}
     for et in unique_types:
         data = all_dists[all_types==et]
         x_vals, y_vals = compute_kde(data, **kde_kwargs)
         values_and_kdes[et] = (pd.DataFrame({'value': data}), pd.DataFrame({'x': x_vals, 'density': y_vals}))
-    return values_and_kdes
+    nodes_dist = compute_distribution_per_type(all_atom_types)
+    edges_dist = compute_distribution_per_type(all_types)
+    edges_nobond_dist = compute_distribution_per_type(all_types, remove_no_edge=True)
+    type_dists = {
+        'nodes': nodes_dist,
+        'edges': edges_dist,
+        'edges_no_bond': edges_nobond_dist
+    }
+    return values_and_kdes, type_dists
 
 
 
@@ -65,6 +89,11 @@ def save_kdes(path, values, kde):
     values.to_csv(path + '/data.csv', index=False)
     kde.to_csv(path + '/kde.csv', index=False)
     
+
+def save_distributions(path, type_dists):
+    # save as a single json file
+    with open(path + '/distributions.json', 'w') as f:
+        json.dump(type_dists, f, indent=4)
 
 def compute_template(path):
     # compute a latex template for plotting the kde
@@ -114,7 +143,7 @@ def compute_template(path):
 
 def compute_and_store_kdes_per_bond_type(kde_path, data, kde_kwargs=None):
     # compute kdes
-    values_and_kdes = create_values_and_kde(data, kde_kwargs=kde_kwargs)
+    values_and_kdes, type_dists = create_values_and_kde(data, kde_kwargs=kde_kwargs)
     for et, (values, kdes) in values_and_kdes.items():
         bond_path = os.path.join(kde_path, f'bond_{int(et)}')
         os.makedirs(bond_path, exist_ok=True)
@@ -122,6 +151,7 @@ def compute_and_store_kdes_per_bond_type(kde_path, data, kde_kwargs=None):
         # save tex file
         with open(os.path.join(bond_path, 'kde.tex'), 'w') as f:
             f.write(compute_template(bond_path))
+    save_distributions(kde_path, type_dists)
 
 
 def scan_all_checkpoints_and_compute_kdes(kde_kwargs=None):
