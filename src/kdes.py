@@ -27,7 +27,7 @@ def compute_dists_types(data):
 def compute_kde(data, **kwargs):
     # compute kde from an array of data
     kde = gaussian_kde(data, **kwargs)
-    x_vals = np.linspace(min(data), max(data), 200)
+    x_vals = np.linspace(min(data)-1, max(data)+1, 200)
     y_vals = kde(x_vals)
     return x_vals, y_vals
 
