@@ -3,4 +3,4 @@ mode: gen
 compile: false
 enable_log: false
 decode: false
-how_many: 1000
+how_many: 10000
