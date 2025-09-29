@@ -332,14 +332,11 @@ class RunContext:
     #                     STORING AND CHECKPOINTING METHODS                    #
     ############################################################################
 
-    def store_graphs(self, graphs: List, path: str=None):
+    def store_graphs(self, graphs: List, path: str=None, filename: str=None):
         if path is None:
-            # store graphs with date and time in name
-            filename = f'generated_graphs_N={str(len(graphs))}_D={datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pkl'
-            path = self.run_directory / filename
-        # store graphs using pickle
-        with open(path, 'wb') as f:
-            pkl.dump(graphs, f)
+            path = self.run_directory
+
+        return store_graphs(graphs=graphs, path=path, filename=filename)
 
 
     def load_checkpoint(self, checkpoint_name: str=None, strict: bool=True):
@@ -435,6 +432,13 @@ class RunContext:
         epochs = [(int(get_epoch(filename)), filename) for filename in ckpt_files if filename_ok(filename)]
         if len(epochs) == 0:
             return None
+        # check for duplicate epochs (e.g., when using EMA)
+        epochs_dict = {}
+        for e in epochs:
+            if e[0] in epochs_dict and 'EMA' in epochs_dict[e[0]]:
+                continue
+            epochs_dict[e[0]] = e[1]
+        epochs = [(v, k) for v, k in epochs_dict.items()]
         max_epoch = max(epochs, key=lambda x: x[0])
         return max_epoch[1]
     
@@ -1076,6 +1080,20 @@ def preprocess_config(cfg: DictConfig):
 
     return cfg
 
+
+def store_graphs(graphs: List, path: str, filename: str=None):
+    if filename is None:
+        # store graphs with date and time in name
+        filename = f'generated_graphs_N={str(len(graphs))}_D={datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pkl'
+    
+    if isinstance(path, str):
+        path = Path(path)
+    
+    path = path / filename
+
+    # store graphs using pickle
+    with open(path, 'wb') as f:
+        pkl.dump(graphs, f)
 
 ################################################################################
 #                            CONFIGURATION METHODS                             #

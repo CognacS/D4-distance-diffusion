@@ -392,9 +392,10 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
             batch_size = self.BS
         
             # compute sampling metrics
-            assignment_results, hists = self.perform_assignment(
+            assignment_results, hists, *others = self.perform_assignment(
                 assignment=assignment, other_metrics=metrics,
-                sampling_kwargs={'batch_size': batch_size}
+                sampling_kwargs={'batch_size': batch_size},
+                return_samples=(which == 'test'),
             )
             
             # add the assignment results to the metrics
@@ -413,6 +414,17 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         )
 
         self.log_dict(to_log, rank_zero_only=True)
+        
+        if which == 'test':
+            ckp_path = self.trainer.checkpoint_callback.best_model_path
+            # extract the path, without the checkpoint name
+            if ckp_path != '':
+                ckp_path = os.path.dirname(ckp_path)
+                from src.configurator import store_graphs
+                store_graphs(
+                    graphs = others[0],
+                    path = ckp_path
+                )
 
 
     def kl_prior(self, clean_data, node_mask):

@@ -240,7 +240,7 @@ class GeneratorWithEvaluation(Generator):
 
 
     @torch.no_grad()
-    def perform_assignment(self, assignment: Assignment=None, conditioning_elems=None, sampling_kwargs=None, other_metrics=None) -> Dict:
+    def perform_assignment(self, assignment: Assignment=None, conditioning_elems=None, sampling_kwargs=None, other_metrics=None, return_samples=False) -> Dict:
 
         if assignment is None:
             return {}, None
@@ -272,7 +272,10 @@ class GeneratorWithEvaluation(Generator):
             **sampling_data
         )
 
-        return assignment_results, hists
+        if return_samples:
+            return assignment_results, hists, sampling_data['data']
+        else:
+            return assignment_results, hists
 
 
     def log_sampled_graphs(self, samples, how_many=10, method='networkx'):
