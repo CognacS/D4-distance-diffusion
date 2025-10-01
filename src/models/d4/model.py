@@ -291,6 +291,8 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             KEY_VALID: deepcopy(metrics),
             KEY_TEST: deepcopy(metrics)
         })
+        
+        self.start_time = time.time()
 
         # save hyperaparameters (but those not in the Generator ignored list)
         self.save_hyperparameters(ignore=GeneratorWithEvaluation.IGNORED_HPARAMS + ['received_dims'])

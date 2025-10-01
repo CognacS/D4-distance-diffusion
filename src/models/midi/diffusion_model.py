@@ -190,6 +190,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         self.log_every_steps = cfg.general.log_every_steps
         self.number_chain_steps = cfg.general.number_chain_steps
+        self.start_epoch_time = time.time()
         
     
     # compatibility method to rename data fields
