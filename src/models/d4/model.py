@@ -735,10 +735,11 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         self.log_dict(to_log)
         
         if which == KEY_TEST:
-            ckp_path = self.trainer.checkpoint_callback.best_model_path
+            from pathlib import Path
+            ckp_path = Path(self.trainer.log_dir)
             # extract the path, without the checkpoint name
             if ckp_path != '':
-                ckp_path = os.path.dirname(ckp_path)
+                ckp_path = ckp_path.parent.parent
                 from src.configurator import store_graphs
                 store_graphs(
                     graphs = others[0],
