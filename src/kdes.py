@@ -225,8 +225,8 @@ def aggregate_statistics_of_configs(round_digits=4, latex_format=True):
         # compute mean and std
         for k1, v1 in stats_dict.items():
             for k2, v2 in v1.items():
-                mean = np.mean(v2).round(round_digits)
-                std = np.std(v2).round(round_digits)
+                mean = (np.mean(v2)*100).round(round_digits)
+                std = (np.std(v2)*100).round(round_digits)
                 if latex_format:
                     # force to have exactly round_digits digits
                     stats_dict[k1][k2] = f'\\nlvalpm{{{mean:.{round_digits}f}}}{{{std:.{round_digits}f}}}'
