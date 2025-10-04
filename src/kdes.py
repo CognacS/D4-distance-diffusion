@@ -84,9 +84,10 @@ def load_data(filepath):
     return data
 
 
-def save_kdes(path, values, kde):
+def save_kdes(path, values, kde, include_data=False):
     # save values and kde to csv files
-    values.to_csv(path + '/data.csv', index=False)
+    if include_data:
+        values.to_csv(path + '/data.csv', index=False)
     kde.to_csv(path + '/kde.csv', index=False)
     
 
@@ -141,20 +142,22 @@ def compute_template(path):
 
 
 
-def compute_and_store_kdes_per_bond_type(kde_path, data, kde_kwargs=None):
+def compute_and_store_kdes_per_bond_type(kde_path, data, include_tex=False, include_data=False, kde_kwargs=None):
     # compute kdes
     values_and_kdes, type_dists = create_values_and_kde(data, kde_kwargs=kde_kwargs)
     for et, (values, kdes) in values_and_kdes.items():
         bond_path = os.path.join(kde_path, f'bond_{int(et)}')
         os.makedirs(bond_path, exist_ok=True)
-        save_kdes(bond_path, values, kdes)
-        # save tex file
-        with open(os.path.join(bond_path, 'kde.tex'), 'w') as f:
-            f.write(compute_template(bond_path))
+        save_kdes(bond_path, values, kdes, include_data=include_data)
+        
+        if include_tex:
+            # save tex file
+            with open(os.path.join(bond_path, 'kde.tex'), 'w') as f:
+                f.write(compute_template(bond_path))
     save_distributions(kde_path, type_dists)
 
 
-def scan_all_checkpoints_and_compute_kdes(kde_kwargs=None):
+def scan_all_checkpoints_and_compute_kdes(include_tex=False, include_data=False, kde_kwargs=None):
     # scan all checkpoints in the checkpoints directory and compute kdes for each of them
     # save the kdes in a directory called kdes, with a subdirectory for each checkpoint
     # each subdirectory will contain a subdirectory for each edge type, containing the data and kde csv files
@@ -174,14 +177,65 @@ def scan_all_checkpoints_and_compute_kdes(kde_kwargs=None):
                 
                 # create kde directory
                 config_name = root.split('/')[2]
-                kde_path = os.path.join(kdes_dir, config_name)
+                version_name = root.split('/')[3]
+                kde_path = os.path.join(kdes_dir, config_name, version_name)
                 os.makedirs(kde_path, exist_ok=True)
                 data = load_data(path)
-
                 # compute kdes
                 compute_and_store_kdes_per_bond_type(kde_path, data, kde_kwargs=kde_kwargs)
-                print(f'KDEs saved in {kde_path}')
-                
+                print(f'\tKDEs saved in {kde_path}')
+
+
+def aggregate_statistics_of_configs(round_digits=4, latex_format=True):
+    # aggregate statistics across all versions of configs
+    # want to compute mean and std of distributions of node and edge types
+    kdes_dir = "./kdes"
+    # check it exists
+    if not os.path.exists(kdes_dir):
+        print(f'No KDEs directory found at {kdes_dir}, returning...')
+        return
+    for config_dir in os.listdir(kdes_dir):
+        if not os.path.isdir(os.path.join(kdes_dir, config_dir)):
+            continue
+        config_path = os.path.join(kdes_dir, config_dir)
+        print(f'Processing config {config_path}')
+
+        ##############  GATHERING ALL RESULTS FROM EACH VERSION  ###############
+        stats_dict = None
+        for ver_dir in os.listdir(config_path):
+            if not os.path.isdir(os.path.join(config_path, ver_dir)):
+                continue
+            if 'bond_' in ver_dir:
+                break
+            print(f'\tProcessing version {ver_dir}')
+            ver_path = os.path.join(config_path, ver_dir)
+            with open(os.path.join(ver_path, 'distributions.json'), 'r') as f:
+                dist_dict = json.load(f)
+            if stats_dict is None:
+                stats_dict = {k1: {k2: [] for k2 in v1.keys()} for k1, v1 in dist_dict.items()}
+            for k1, v1 in dist_dict.items():
+                for k2, v2 in v1.items():
+                    stats_dict[k1][k2].append(v2)
+        
+        if stats_dict is None:
+            print(f'\tSkipping dataset directory {config_dir}')
+            continue
+        ##################  COMPUTING MEAN AND STD OF CONFIG  ##################
+        print(f'\tComputing mean and std of distributions for config {config_dir}')
+        # compute mean and std
+        for k1, v1 in stats_dict.items():
+            for k2, v2 in v1.items():
+                mean = np.mean(v2).round(round_digits)
+                std = np.std(v2).round(round_digits)
+                if latex_format:
+                    # force to have exactly round_digits digits
+                    stats_dict[k1][k2] = f'\\nlvalpm{{{mean:.{round_digits}f}}}{{{std:.{round_digits}f}}}'
+                else:
+                    stats_dict[k1][k2] = {'mean': mean, 'std': std}
+
+        # save stats
+        with open(os.path.join(config_path, 'stats.json'), 'w') as f:
+            json.dump(stats_dict, f, indent=4)
 
 def scan_single_data_and_compute_kdes(data, config_name, kde_kwargs=None):
     print(f'Computing kdes for dataset {config_name}')
