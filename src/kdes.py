@@ -81,6 +81,9 @@ def load_data(filepath):
     # load data from a pickle file
     with open(filepath, 'rb') as f:
         data = pickle.load(f)
+        
+    if not isinstance(data, list):
+        data = data.to_data_list()
     return data
 
 
