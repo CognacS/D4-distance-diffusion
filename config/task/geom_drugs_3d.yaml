@@ -1,4 +1,0 @@
-defaults:
-  - dataset: geom_drugs_3d
-  - pre_transform: to_onehot_mols
-  - test: molecular_3d

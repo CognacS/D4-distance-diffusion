@@ -13,7 +13,7 @@ The code was tested with Python 3.11.7. The requirements can be installed by fol
     ```bash
     pip install -e .
     ```
-    which will compile required cython and c++ code.
+    which will compile required cython and c++ code, if needed.
 
 ## Experiments
 
@@ -43,15 +43,39 @@ Configurations are composed of:
 
 Presets can be defined in the `config/presets` directory, and experiments can be run by using the following command:
 ```bash
-    python main.py +preset=<preset> seed=<seed>
+    python main.py +preset/<group>=<preset> seed=<seed>
 ```
-where `<preset>` is the name of the preset to use, and `<seed>` is the seed to use for the experiment. The seed is optional, and if not provided, the experiment will be run with a default seed. Experiments are always run with reproducibility.
+where `<group>` is the group of experiments, e.g., `final/d4/qm9`, and `<preset>` is the specific preset to use, and `<seed>` is the seed to use for the experiment. The seed is optional, and if not provided, the experiment will be run with a default seed. Experiments are always run with reproducibility.
+
+### Generation
+To generate molecules with a trained model, use the following command:
+```bash
+    python main.py +preset/<group>=<preset> load_ckp=<version> +options=generate
+```
+This command will load the checkpoint of version `<version>` with the specified configuration `+preset/<group>=<preset>`. More options for customizing the generation, e.g., the number of graphs, can be found in `config/option/generate.yaml`, and can be entered as in [hydra](https://hydra.cc).
 
 ### Datasets
-Datasets will be downloaded automatically to a new directory ./datasets when running an experiment.
+Datasets will be downloaded automatically to a new directory ./datasets when running an experiment. Datasets can also be downloaded beforehand using the command:
+```bash
+    python download_dataset.py +preset/<group>=<preset>
+```
+which will download the dataset required for configuration `+preset/<group>=<preset>`.
 
 ### Checkpoints and logging
 Checkpoints are saved in a new directory ./checkpoints, and logging can be done through TensorBoard or WandB, which requires a free account to be used.
+
+### Computing KDEs
+To compute Kernel Density Estimates (KDEs) for the generated molecules (in the form of `.pkl` files inside the checkpoints' directories), use the following command:
+```bash
+    python compute_kdes_checkpoints.py
+```
+that will generate a new directory `./kdes` with the same folder structure as `./checkpoints`.
+Arguments can be entered by customizing `compute_kdes_checkpoints.py`.
+To compute KDEs for datasets, use the following command:
+```bash
+    python compute_kdes_dataset.py +preset/<group>=<preset>
+```
+which will compute the KDEs for the dataset required for configuration `+preset/<group>=<preset>`.
 
 ## License
 This code is released under the MIT License. See LICENSE file for details.

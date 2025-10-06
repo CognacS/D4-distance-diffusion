@@ -1,5 +1,0 @@
-defaults:
- - DiscreteDenoisingDiffusionModel: digress_marginal
-
-
- 

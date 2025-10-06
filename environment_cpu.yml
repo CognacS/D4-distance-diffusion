@@ -24,3 +24,4 @@ dependencies:
     - git+https://github.com/fabriziocosta/EDeN.git # for computing nspdk
     - python_log_indenter # for better logging
     - hydra-optuna-sweeper
+    - imageio

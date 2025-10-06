@@ -7,7 +7,6 @@ method:
     model:
         params:
             denoising:
-                distance_output_mode: conditional
                 loss:
                     lambda_eigenvalues_regularization: 1.0
 

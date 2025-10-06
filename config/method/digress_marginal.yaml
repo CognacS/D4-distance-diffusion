@@ -1,3 +1,0 @@
-defaults:
-  - digress@
-  - override model/DiscreteDenoisingDiffusionModel: digress_marginal
