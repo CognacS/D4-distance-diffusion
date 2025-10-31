@@ -84,7 +84,7 @@ def get_molecule_stats(mols: List[Chem.Mol]):
         for bond in mol.GetBonds():
             bonds.add(str(bond.GetBondType()))
 
-    atoms = list(atoms)
+    atoms = sorted(list(atoms))
     bonds = list(bonds)
     # reorder bonds to match BOND_TYPES_REAl order
     # BOND_TYPES_REV maps from string to rdkit BondType
