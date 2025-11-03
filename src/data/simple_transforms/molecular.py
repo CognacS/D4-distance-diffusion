@@ -17,6 +17,7 @@ from rdkit.Chem.rdchem import BondType as BT
 from rdkit.Geometry import Point3D
 from rdkit import DistanceGeometry
 from rdkit.Chem import AllChem
+from rdkit.Chem import ChemicalForceFields
 import networkx as nx
 
 from src.data.simple_transforms import batched
@@ -170,7 +171,8 @@ def build_molecule(
     ###############################  PARSE ATOMS  ##############################
     mol = Chem.RWMol()
     for i, atom in enumerate(atom_types):
-        a = Chem.Atom(atom_decoder[atom.item()])
+        a = Chem.Atom(atom_decoder[atom.item()].split('_')[0])
+        #a = Chem.Atom(atom_decoder[atom.item()])
         if charges is not None:
             charge = charge_decoder[charges[i].item()]
             if charge != 0:
@@ -250,6 +252,8 @@ def build_graph_from_molecule(
         include_pos: bool=False,
         include_charges: bool=False
     ):
+    
+    mp = ChemicalForceFields.MMFFGetMoleculeProperties(mol)
 
     if hard_remove_hydrogens:
         h_idx = len(atom_encoder)
@@ -262,7 +266,9 @@ def build_graph_from_molecule(
             return None
         
     if include_charges:
-        charges = [charge_encoder[atom.GetFormalCharge()] for atom in mol.GetAtoms()]
+        charges = []
+        for atom in mol.GetAtoms():
+            charges.append(charge_encoder[float(atom.GetFormalCharge())])
         charges = torch.tensor(charges, dtype=torch.long)
 
     # build graph from molecule
@@ -271,7 +277,9 @@ def build_graph_from_molecule(
     edge_types = []
 
     for atom in mol.GetAtoms():
-        atom_types.append(atom_encoder[atom.GetSymbol()])
+        FFMM_atom_type = mp.GetMMFFAtomType(atom.GetIdx())
+        atom_label = f"{atom.GetSymbol()}_{FFMM_atom_type}"
+        atom_types.append(atom_encoder[atom_label])
     
 
     for bond in mol.GetBonds():
@@ -322,6 +330,91 @@ def build_graph_from_molecule(
     )
 
     return g
+
+
+
+# def build_graph_from_molecule(
+#         mol: Chem.Mol,
+#         atom_encoder: Union[Dict[int, str], Dict[str, int]],
+#         bond_encoder: Union[Dict[int, str], Dict[str, int]],
+#         charge_encoder: Optional[Union[Dict[int, float], Dict[float, int]]] = None,
+#         hard_remove_hydrogens: bool=False,
+#         include_pos: bool=False,
+#         include_charges: bool=False
+#     ):
+
+#     if hard_remove_hydrogens:
+#         h_idx = len(atom_encoder)
+#         atom_encoder = {**atom_encoder, 'H': h_idx} # add temporary hydrogen to atom encoder
+        
+#     if include_pos:
+#         pos = get_pos_from_mol(mol)
+#         # if the method fails, return None, as the molecule is not usable
+#         if pos is None:
+#             return None
+        
+#     if include_charges:
+#         charges = [charge_encoder[atom.GetFormalCharge()] for atom in mol.GetAtoms()]
+#         charges = torch.tensor(charges, dtype=torch.long)
+
+#     # build graph from molecule
+#     atom_types = []
+#     edge_index = []
+#     edge_types = []
+
+#     for atom in mol.GetAtoms():
+#         atom_types.append(atom_encoder[atom.GetSymbol()])
+    
+
+#     for bond in mol.GetBonds():
+#         start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+#         bond_type = str(bond.GetBondType())
+
+#         edge_index.append([start, end])
+#         edge_types.append(bond_encoder[bond_type])
+    
+
+#     # tranform to tensor
+#     x = torch.tensor(atom_types, dtype=torch.long)
+#     if len(edge_index) == 0: # if no edges, then set special case
+#         edge_index = torch.tensor([[], []], dtype=torch.long)
+#     else:
+#         edge_index = torch.tensor(edge_index, dtype=torch.long).permute(1, 0)
+#     edge_attr = torch.tensor(edge_types, dtype=torch.long)
+
+#     if hard_remove_hydrogens:
+#         to_keep = x < h_idx # keep all atoms that are not hydrogen
+#         edge_index, edge_attr = subgraph(
+#             to_keep, edge_index, edge_attr, relabel_nodes=True,
+#             num_nodes=len(to_keep)
+#         )
+#         x = x[to_keep]
+
+#     # make graph undirected
+#     edge_index, edge_attr = to_undirected(edge_index, edge_attr, num_nodes=x.size(0))
+    
+#     addons = {}
+    
+#     if include_pos:
+#         addons['node_pos'] = pos
+#         if hard_remove_hydrogens:
+#             addons['node_pos'] = addons['node_pos'][to_keep]
+#             # recompute center
+#             addons['node_pos'] = addons['node_pos'] - torch.mean(addons['node_pos'], dim=0, keepdim=True)
+#     if include_charges:
+#         addons['node_charges'] = charges
+#         if hard_remove_hydrogens:
+#             addons['node_charges'] = addons['node_charges'][to_keep]
+
+#     g = SparseGraph(
+#         x=x,
+#         edge_index=edge_index,
+#         edge_attr=edge_attr,
+#         **addons
+#     )
+
+#     return g
+
 
 
 # from GDSS
