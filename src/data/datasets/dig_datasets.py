@@ -277,7 +277,7 @@ class BaseDigMoleculesRaw(ExtendedMolecularDatasetRaw):
         )
 
         # get statistics
-        self.stats = molutils.get_molecule_stats(self.mols)
+        self.stats = molutils.get_molecule_stats(self.mols, self.atom_types_repr)
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
         self.charges = self.stats['charges']
