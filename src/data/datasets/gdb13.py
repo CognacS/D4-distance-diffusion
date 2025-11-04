@@ -46,7 +46,8 @@ class GDB13Raw(ExtendedMolecularDatasetRaw):
             num_workers: int = 0,
             chunksize: Optional[int] = None,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            atom_types_repr: str = 'default',
         ):
 
         if root is None:
@@ -58,7 +59,8 @@ class GDB13Raw(ExtendedMolecularDatasetRaw):
             compute_3d_conformer=compute_3d_conformer,
             properties_computer_function=properties_computer_function,
             num_workers=num_workers, chunksize=chunksize,
-            pre_transform=pre_transform, pre_filter=pre_filter
+            pre_transform=pre_transform, pre_filter=pre_filter,
+            atom_types_repr=atom_types_repr,
         )
         
         self.load_data(
@@ -103,7 +105,7 @@ class GDB13Raw(ExtendedMolecularDatasetRaw):
         )
 
         # get statistics
-        self.stats = molutils.get_molecule_stats(self.mols)
+        self.stats = molutils.get_molecule_stats(self.mols, self.atom_types_repr)
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
         self.charges = self.stats['charges']
@@ -131,7 +133,8 @@ class GDB13(MolecularGraphsDataset):
             pre_filter_raw=None,
             transform=None,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            atom_types_repr: str = 'default',
         ):
 
         if root is None:
@@ -144,7 +147,8 @@ class GDB13(MolecularGraphsDataset):
             compute_3d_conformer=include_pos,
             properties_computer_function=properties_computer_function,
             num_workers=num_workers, chunksize=chunksize,
-            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw
+            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw,
+            atom_types_repr=atom_types_repr
         )
 
         super().__init__(
@@ -154,6 +158,7 @@ class GDB13(MolecularGraphsDataset):
             hard_remove_hydrogens=hard_remove_hydrogens,
             include_pos=include_pos, include_charges=include_charges,
             transform=transform, pre_transform=pre_transform, pre_filter=pre_filter,
+            atom_types_repr=atom_types_repr
             #num_workers=num_workers, chunksize=chunksize
         )
 
@@ -216,7 +221,8 @@ class GDB13Resources(DataResources):
             pre_transform=None,
             pre_filter=None,
             pre_transform_raw=None,
-            pre_filter_raw=None
+            pre_filter_raw=None,
+            atom_types_repr: str = 'default',
         ):
 
         super().__init__()
@@ -233,7 +239,8 @@ class GDB13Resources(DataResources):
             'num_workers': num_workers,
             'chunksize': chunksize,
             'pre_transform_raw': pre_transform_raw,
-            'pre_filter_raw': pre_filter_raw
+            'pre_filter_raw': pre_filter_raw,
+            'atom_types_repr': atom_types_repr
         }
         self.smiles_cfg = {
             'sanitize': sanitize,
