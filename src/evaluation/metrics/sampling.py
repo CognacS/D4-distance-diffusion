@@ -385,6 +385,9 @@ class ValidMoleculeMetric(BaseSamplingMetric):
                 except Chem.rdchem.KekulizeException:
                     #print("Can't kekulize molecule")
                     all_smiles.append(None)
+                except: #AtomKekulizeException #TODO: drigoni remove print
+                    print("Can't atom kekulize molecule:", smiles)
+                    all_smiles.append(None)
             else:
                 all_smiles.append(None)
 
