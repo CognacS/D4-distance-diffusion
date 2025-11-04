@@ -1,4 +1,0 @@
-defaults:
- - DummyModel@params: config
-
-name: DummyModel

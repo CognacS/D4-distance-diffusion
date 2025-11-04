@@ -11,5 +11,4 @@ reg_architectures = ClassRegister('Architectures')
     
 import src.models.d4.model
 import src.models.midi.diffusion_model
-import src.models.dummy.diffusion_model
 import src.models.architectures

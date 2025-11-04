@@ -54,4 +54,4 @@ config_name: qm9-midi
 seed: 0
 
 mode: train+eval
-compile: false
+compile: true
