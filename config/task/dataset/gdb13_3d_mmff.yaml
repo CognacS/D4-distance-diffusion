@@ -1,0 +1,15 @@
+name: gdb13_mmff
+params:
+    root: 'datasets/gdb13_mmff'
+    random_splits:
+        train: null
+        valid: 0.1
+        test: 0.1
+    include_pos: true
+    include_charges: true
+    sanitize: false
+    kekulize: true
+    remove_hydrogens: true
+    hard_remove_hydrogens: false
+    num_workers: 8
+    chunksize: 2000
