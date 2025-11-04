@@ -34,12 +34,15 @@ class GeomDrugsRaw(RawDataset):
             remove_hydrogens: bool = True,
             kekulize: bool = True,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            atom_types_repr: str = 'default',
         ):
 
         self.sanitize = sanitize
         self.remove_hydrogens = remove_hydrogens
         self.kekulize = kekulize
+        self.atom_types_repr = atom_types_repr
+
         assert split is not None, 'Split must be specified for Geom-Drugs dataset'
 
         if root is None:
@@ -103,7 +106,7 @@ class GeomDrugsRaw(RawDataset):
         self.save(self.mols, self.raw_paths[0])
 
         # get statistics
-        self.stats = molutils.get_molecule_stats(self.mols)
+        self.stats = molutils.get_molecule_stats(self.mols, self.atom_types_repr)
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
         self.charges = self.stats['charges']
@@ -135,7 +138,8 @@ class GeomDrugs(MolecularGraphsDataset):
             pre_filter_raw=None,
             transform=None,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            atom_types_repr: str = 'default',
         ):
 
         if root is None:
@@ -145,7 +149,8 @@ class GeomDrugs(MolecularGraphsDataset):
         raw_dataset = GeomDrugsRaw(
             root, sanitize=sanitize,
             remove_hydrogens=remove_hydrogens, kekulize=kekulize,
-            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw
+            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw,
+            atom_types_repr=atom_types_repr
         )
 
         super().__init__(
@@ -155,7 +160,7 @@ class GeomDrugs(MolecularGraphsDataset):
             hard_remove_hydrogens=hard_remove_hydrogens,
             include_pos=include_pos, include_charges=include_charges,
             transform=transform, pre_transform=pre_transform, pre_filter=pre_filter,
-            not_splittable=True
+            not_splittable=True, atom_types_repr=atom_types_repr
         )
 
 class GeomDrugsSmiles(SmilesDataset):
@@ -208,7 +213,8 @@ class GeomDrugsResources(DataResources):
             pre_transform=None,
             pre_filter=None,
             pre_transform_raw=None,
-            pre_filter_raw=None
+            pre_filter_raw=None,
+            atom_types_repr: str = 'default',
         ):
 
         super().__init__()
@@ -223,7 +229,8 @@ class GeomDrugsResources(DataResources):
             'include_pos': include_pos,
             'include_charges': include_charges,
             'pre_transform_raw': pre_transform_raw,
-            'pre_filter_raw': pre_filter_raw
+            'pre_filter_raw': pre_filter_raw,
+            'atom_types_repr': atom_types_repr
         }
         self.smiles_cfg = {
             'sanitize': sanitize,
