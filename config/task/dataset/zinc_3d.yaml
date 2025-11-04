@@ -6,7 +6,7 @@ params:
         # test is predefined
     include_pos: true
     include_charges: true
-    sanitize: false
+    sanitize: true
     kekulize: true
     remove_hydrogens: true
     hard_remove_hydrogens: false

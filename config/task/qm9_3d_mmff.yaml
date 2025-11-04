@@ -1,4 +1,4 @@
 defaults:
-  - dataset: qm9_mmff_3d
+  - dataset: qm9_3d_mmff
   - pre_transform: to_onehot_mols
   - test: molecular_3d
