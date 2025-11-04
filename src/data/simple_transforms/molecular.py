@@ -21,6 +21,7 @@ from rdkit.Chem import ChemicalForceFields
 import networkx as nx
 
 from src.data.simple_transforms import batched
+from src.data.datasets import reg_atom_types_representation
 
 BOND_TYPES_REAL = {1: BT.SINGLE, 2: BT.DOUBLE, 3: BT.TRIPLE, 4: BT.AROMATIC}
 BOND_TYPES_REAL_REV = {v: k for k, v in BOND_TYPES_REAL.items()}
@@ -163,16 +164,19 @@ def build_molecule(
         pos: Optional[Tensor]=None,
         distance: Optional[Tensor]=None,
         relaxed: bool=False,
-        verbose: bool=False
+        verbose: bool=False,
+        atom_types_repr: str= 'default'
     ) -> Chem.Mol:
     if verbose:
         print("building new molecule")
 
+
     ###############################  PARSE ATOMS  ##############################
     mol = Chem.RWMol()
+    mol_encoder = reg_atom_types_representation.get_instance(atom_types_repr, molecule=mol)  # this line is just to initialize the encoder
     for i, atom in enumerate(atom_types):
-        a = Chem.Atom(atom_decoder[atom.item()].split('_')[0])
-        #a = Chem.Atom(atom_decoder[atom.item()])
+        atom_label = mol_encoder.decode_atom_representation(atom_decoder[atom.item()])
+        a = Chem.Atom(atom_label)
         if charges is not None:
             charge = charge_decoder[charges[i].item()]
             if charge != 0:
@@ -250,10 +254,9 @@ def build_graph_from_molecule(
         charge_encoder: Optional[Union[Dict[int, float], Dict[float, int]]] = None,
         hard_remove_hydrogens: bool=False,
         include_pos: bool=False,
-        include_charges: bool=False
+        include_charges: bool=False,
+        atom_types_repr: str='default'
     ):
-    
-    mp = ChemicalForceFields.MMFFGetMoleculeProperties(mol)
 
     if hard_remove_hydrogens:
         h_idx = len(atom_encoder)
@@ -276,9 +279,11 @@ def build_graph_from_molecule(
     edge_index = []
     edge_types = []
 
+    # get mol encoder
+    mol_encoder = reg_atom_types_representation.get_instance(atom_types_repr, molecule=mol)
+
     for atom in mol.GetAtoms():
-        FFMM_atom_type = mp.GetMMFFAtomType(atom.GetIdx())
-        atom_label = f"{atom.GetSymbol()}_{FFMM_atom_type}"
+        atom_label = mol_encoder.encode_atom_representation(atom)
         atom_types.append(atom_encoder[atom_label])
     
 
@@ -332,91 +337,6 @@ def build_graph_from_molecule(
     return g
 
 
-
-# def build_graph_from_molecule(
-#         mol: Chem.Mol,
-#         atom_encoder: Union[Dict[int, str], Dict[str, int]],
-#         bond_encoder: Union[Dict[int, str], Dict[str, int]],
-#         charge_encoder: Optional[Union[Dict[int, float], Dict[float, int]]] = None,
-#         hard_remove_hydrogens: bool=False,
-#         include_pos: bool=False,
-#         include_charges: bool=False
-#     ):
-
-#     if hard_remove_hydrogens:
-#         h_idx = len(atom_encoder)
-#         atom_encoder = {**atom_encoder, 'H': h_idx} # add temporary hydrogen to atom encoder
-        
-#     if include_pos:
-#         pos = get_pos_from_mol(mol)
-#         # if the method fails, return None, as the molecule is not usable
-#         if pos is None:
-#             return None
-        
-#     if include_charges:
-#         charges = [charge_encoder[atom.GetFormalCharge()] for atom in mol.GetAtoms()]
-#         charges = torch.tensor(charges, dtype=torch.long)
-
-#     # build graph from molecule
-#     atom_types = []
-#     edge_index = []
-#     edge_types = []
-
-#     for atom in mol.GetAtoms():
-#         atom_types.append(atom_encoder[atom.GetSymbol()])
-    
-
-#     for bond in mol.GetBonds():
-#         start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
-#         bond_type = str(bond.GetBondType())
-
-#         edge_index.append([start, end])
-#         edge_types.append(bond_encoder[bond_type])
-    
-
-#     # tranform to tensor
-#     x = torch.tensor(atom_types, dtype=torch.long)
-#     if len(edge_index) == 0: # if no edges, then set special case
-#         edge_index = torch.tensor([[], []], dtype=torch.long)
-#     else:
-#         edge_index = torch.tensor(edge_index, dtype=torch.long).permute(1, 0)
-#     edge_attr = torch.tensor(edge_types, dtype=torch.long)
-
-#     if hard_remove_hydrogens:
-#         to_keep = x < h_idx # keep all atoms that are not hydrogen
-#         edge_index, edge_attr = subgraph(
-#             to_keep, edge_index, edge_attr, relabel_nodes=True,
-#             num_nodes=len(to_keep)
-#         )
-#         x = x[to_keep]
-
-#     # make graph undirected
-#     edge_index, edge_attr = to_undirected(edge_index, edge_attr, num_nodes=x.size(0))
-    
-#     addons = {}
-    
-#     if include_pos:
-#         addons['node_pos'] = pos
-#         if hard_remove_hydrogens:
-#             addons['node_pos'] = addons['node_pos'][to_keep]
-#             # recompute center
-#             addons['node_pos'] = addons['node_pos'] - torch.mean(addons['node_pos'], dim=0, keepdim=True)
-#     if include_charges:
-#         addons['node_charges'] = charges
-#         if hard_remove_hydrogens:
-#             addons['node_charges'] = addons['node_charges'][to_keep]
-
-#     g = SparseGraph(
-#         x=x,
-#         edge_index=edge_index,
-#         edge_attr=edge_attr,
-#         **addons
-#     )
-
-#     return g
-
-
-
 # from GDSS
 def valid_mol_can_with_seg(x, largest_connected_comp=True):
     if x is None:
@@ -442,6 +362,7 @@ class GraphToMoleculeConverter:
             post_hoc_mols_convert: bool=False,
             include_pos: bool=False,
             include_charges: bool=False,
+            atom_types_repr: str='default'
         ):
         
         self.relaxed = relaxed
@@ -449,6 +370,7 @@ class GraphToMoleculeConverter:
         self.post_hoc_mols_convert = post_hoc_mols_convert
         self.include_pos = include_pos
         self.include_charges = include_charges
+        self.atom_types_repr = atom_types_repr
 
         self.atom_decoder = check_decoder(atom_decoder, int)
         self.atom_encoder = check_decoder(atom_decoder, str)
@@ -504,7 +426,8 @@ class GraphToMoleculeConverter:
                 atom_decoder =		self.atom_decoder,
                 bond_decoder =		self.bond_decoder,
                 charge_decoder =    self.charge_decoder,
-                relaxed =		    self.relaxed if override_relaxed is None else override_relaxed
+                relaxed =		    self.relaxed if override_relaxed is None else override_relaxed,
+                atom_types_repr =   self.atom_types_repr
             )
 
             # apply correction if needed
@@ -540,7 +463,8 @@ class GraphToMoleculeConverter:
             kekulize: bool=True,
             hard_remove_hydrogens: bool=False,
             override_post_hoc_mols_fix: Optional[bool]=None,
-            override_post_hoc_mols_convert: Optional[bool]=None
+            override_post_hoc_mols_convert: Optional[bool]=None,
+            atom_types_repr: str='default'
         ) -> SparseGraph:
 
         single_mol = False
@@ -576,7 +500,8 @@ class GraphToMoleculeConverter:
                 charge_encoder= self.charge_encoder,
                 hard_remove_hydrogens = hard_remove_hydrogens,
                 include_pos = self.include_pos,
-                include_charges = self.include_charges
+                include_charges = self.include_charges,
+                atom_types_repr = atom_types_repr
             )
 
             out_graphs.append(g)

@@ -42,7 +42,8 @@ class MolecularGraphsDataset(ProcessedDataset):
             transform: Optional[Callable] = None,
             pre_transform: Optional[Callable] = None,
             pre_filter: Optional[Callable] = None,
-            not_splittable: bool = False
+            not_splittable: bool = False,
+            atom_types_repr: str = 'default'
         ) -> None:
 
         # hydrogen removal: during process method call all hydrogens are removed
@@ -51,6 +52,7 @@ class MolecularGraphsDataset(ProcessedDataset):
         self.include_charges = include_charges
         self.num_workers = num_workers
         self.chunksize = chunksize
+        self.atom_types_repr = atom_types_repr
         if hard_remove_hydrogens and 'H' in atom_types:
             atom_types.remove('H')
 
@@ -65,7 +67,8 @@ class MolecularGraphsDataset(ProcessedDataset):
             bond_decoder = bond_decoder,
             charge_decoder = charge_decoder if charges is not None else None,
             include_pos = include_pos,
-            include_charges = include_charges
+            include_charges = include_charges,
+            atom_types_repr = atom_types_repr
         )
 
         self.raw_mol_dataset = raw_mol_dataset
@@ -107,15 +110,15 @@ class MolecularGraphsDataset(ProcessedDataset):
     @property
     def processed_file_names(self) -> str:
         return 'data.pt', 'stats.json'
-    
-    
+
+
     def _prepare_data_worker(self, data):
         # get molecule and properties
         molecule, properties = self.data_to_mol_and_prop(data)
         # convert molecule to graph (optional: fully remove hydrogens)
         graph = self.mol_to_torch_converter.molecule_to_graph(
             molecule, hard_remove_hydrogens=self.hard_remove_hydrogens,
-            kekulize=False # kekulization will be done before if needed
+            kekulize=False, atom_types_repr=self.atom_types_repr # kekulization will be done before if needed
         )
         # add properties to graph if there are any
         if properties is not None:
@@ -295,13 +298,15 @@ class MolecularDataset(RawDataset):
             kekulize: bool = False,
             properties_computer_function: Optional[Callable] = None,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            atom_types_repr: str='default'
         ):
 
         self.sanitize = sanitize
         self.remove_hydrogens = remove_hydrogens
         self.kekulize = kekulize
         self.properties_computer_function = properties_computer_function
+        self.atom_types_repr = atom_types_repr
 
         self.raw_smiles_dataset = raw_smiles_dataset
         super().__init__(root, split=split, pre_transform=pre_transform, pre_filter=pre_filter)
@@ -333,7 +338,7 @@ class MolecularDataset(RawDataset):
         subset.save(subset.props, subset.raw_paths[1])
 
         # get statistics
-        stats_new = molutils.get_molecule_stats(subset.mols)
+        stats_new = molutils.get_molecule_stats(subset.mols, self.atom_types_repr)
         stats_new['atom_types'] = self.atom_types # use old atom types
         stats_new['bond_types'] = self.bond_types # use old bond types
         stats_new['charges'] = self.charges # use old charges
@@ -387,7 +392,7 @@ class MolecularDataset(RawDataset):
         self.save(self.props, self.raw_paths[1])
 
         # get statistics
-        self.stats = molutils.get_molecule_stats(self.mols)
+        self.stats = molutils.get_molecule_stats(self.mols, self.atom_types_repr)
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
         self.charges = self.stats['charges']
@@ -490,7 +495,8 @@ class ExtendedMolecularDatasetRaw(RawDataset):
             chunksize: Optional[int] = None,
             pre_transform=None,
             pre_filter=None,
-            not_splittable: bool = False
+            not_splittable: bool = False,
+            atom_types_repr: str='default'
         ):
         
         self.sanitize = sanitize
@@ -502,6 +508,7 @@ class ExtendedMolecularDatasetRaw(RawDataset):
         self.chunksize = chunksize
         self.pre_transform = pre_transform
         self.pre_filter = pre_filter
+        self.atom_types_repr = atom_types_repr
 
         super().__init__(root, split=split, pre_transform=pre_transform, pre_filter=pre_filter, not_splittable=not_splittable)
 
@@ -534,7 +541,7 @@ class ExtendedMolecularDatasetRaw(RawDataset):
         subset.save(subset.props, props_path)
 
         # get statistics
-        stats_new = molutils.get_molecule_stats(subset.mols)
+        stats_new = molutils.get_molecule_stats(subset.mols, self.atom_types_repr)
         stats_new['atom_types'] = self.atom_types # use old atom types
         stats_new['bond_types'] = self.bond_types # use old bond types
         stats_new['charges'] = self.charges # use old charges

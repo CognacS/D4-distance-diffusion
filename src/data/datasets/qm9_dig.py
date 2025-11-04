@@ -62,7 +62,8 @@ class QM9DigMolecules(MolecularDataset):
                 kekulize: bool = True,
                 properties_computer_function: Optional[Callable] = None,
                 pre_transform=None,
-                pre_filter=None
+                pre_filter=None,
+                atom_types_repr: str='default'
             ):
 
             if root is None:
@@ -82,7 +83,8 @@ class QM9DigMolecules(MolecularDataset):
                 sanitize=sanitize,
                 remove_hydrogens=remove_hydrogens,
                 kekulize=kekulize,
-                properties_computer_function=properties_computer_function
+                properties_computer_function=properties_computer_function,
+                atom_types_repr=atom_types_repr
             )
 
 
@@ -101,7 +103,8 @@ class QM9Dig(MolecularGraphsDataset):
             pre_filter_raw=None,
             transform=None,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            atom_types_repr: str='default'
         ):
 
         if root is None:
@@ -111,14 +114,16 @@ class QM9Dig(MolecularGraphsDataset):
             root=root, sanitize=sanitize,
             remove_hydrogens=remove_hydrogens, kekulize=kekulize,
             properties_computer_function=properties_computer_function,
-            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw
+            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw,
+            atom_types_repr=atom_types_repr
         )
 
         super().__init__(
             root, split=split, raw_mol_dataset=raw_dataset,
             atom_types=raw_dataset.atom_types, bond_types=raw_dataset.bond_types,
             hard_remove_hydrogens=hard_remove_hydrogens,
-            transform=transform, pre_transform=pre_transform, pre_filter=pre_filter
+            transform=transform, pre_transform=pre_transform, pre_filter=pre_filter,
+            atom_types_repr=atom_types_repr
         )
 
 
@@ -137,13 +142,15 @@ class QM9DigResources(BaseDigResources):
             hard_remove_hydrogens: bool = True,
             pre_transform=None,
             pre_filter=None,
+            atom_types_repr: str = 'default',
         ):
         
         qm9_cfg = {
             'sanitize': sanitize,
             'remove_hydrogens': remove_hydrogens,
             'kekulize': kekulize,
-            'hard_remove_hydrogens': hard_remove_hydrogens
+            'hard_remove_hydrogens': hard_remove_hydrogens,
+            'atom_types_repr': atom_types_repr
         }
         smiles_cfg = {} # here in case this is needed in the future
 
@@ -157,4 +164,3 @@ class QM9DigResources(BaseDigResources):
             pre_transform=pre_transform,
             pre_filter=pre_filter
         )
-        

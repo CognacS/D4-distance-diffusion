@@ -9,6 +9,7 @@ import src.noise as noise
 
 def main():
     print(datasets.reg_dataresources)
+    print(datasets.reg_atom_types_representation)
     print(transforms.reg_transforms)
     print(features.reg_features)
     print(models.reg_models)

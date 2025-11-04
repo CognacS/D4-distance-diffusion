@@ -1,0 +1,14 @@
+name: qm9_mmff
+params:
+    root: 'datasets/qm9_mmff'
+    random_splits:
+        train: null
+        valid: 10000
+        test: 10000
+    include_pos: true
+    include_charges: true
+    sanitize: true
+    kekulize: true
+    remove_hydrogens: true
+    hard_remove_hydrogens: false
+    atom_types_repr: 'MMFF'

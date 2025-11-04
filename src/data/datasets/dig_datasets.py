@@ -170,7 +170,8 @@ class BaseDigMoleculesRaw(ExtendedMolecularDatasetRaw):
             num_workers: int = 0,
             chunksize: Optional[int] = None,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            atom_types_repr: str = 'default',
         ):
 
         if which_dataset not in SUPPORTED_DATASETS:
@@ -186,7 +187,8 @@ class BaseDigMoleculesRaw(ExtendedMolecularDatasetRaw):
             compute_3d_conformer=compute_3d_conformer,
             properties_computer_function=properties_computer_function,
             num_workers=num_workers, chunksize=chunksize,
-            pre_transform=pre_transform, pre_filter=pre_filter
+            pre_transform=pre_transform, pre_filter=pre_filter,
+            atom_types_repr=atom_types_repr
         )
         
         self.load_data(

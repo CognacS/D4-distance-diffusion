@@ -14,6 +14,7 @@ from torch_geometric.datasets.qm9 import conversion
 
 from src.data.datasets.core import RawDataset, DataResources, DatasetException, DEFAULT_DATASET_PATH, DEFAULT_SPLITS
 from src.data.datasets.molecular import MolecularGraphsDataset, SmilesDataset
+from src.data.datasets.atom_types_representation import AtomTypeRepresentation
 
 from copy import copy
 
@@ -61,12 +62,14 @@ class QM9Raw(RawDataset):
             remove_hydrogens: bool = True,
             kekulize: bool = True,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            atom_types_repr: str= 'default'
         ):
 
         self.sanitize = sanitize
         self.remove_hydrogens = remove_hydrogens
         self.kekulize = kekulize
+        self.atom_types_repr = atom_types_repr
 
         if root is None:
             root = DEFAULT_DATASET_PATH_QM9
@@ -100,7 +103,7 @@ class QM9Raw(RawDataset):
         subset.save(subset.props, subset.raw_paths[1])
 
         # get statistics
-        stats_new = molutils.get_molecule_stats(subset.mols)
+        stats_new = molutils.get_molecule_stats(subset.mols, self.atom_types_repr)
         stats_new['atom_types'] = self.atom_types # use old atom types
         stats_new['bond_types'] = self.bond_types # use old bond types
         stats_new['charges'] = self.charges # use old charges
@@ -169,7 +172,7 @@ class QM9Raw(RawDataset):
         self.save(self.props, self.raw_paths[1])
 
         # get statistics
-        self.stats = molutils.get_molecule_stats(self.mols)
+        self.stats = molutils.get_molecule_stats(self.mols, self.atom_types_repr)
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
         self.charges = self.stats['charges']
@@ -241,7 +244,8 @@ class QM9(MolecularGraphsDataset):
             pre_filter_raw=None,
             transform=None,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            atom_types_repr: str= 'default'
         ):
 
         if root is None:
@@ -251,7 +255,8 @@ class QM9(MolecularGraphsDataset):
         raw_dataset = QM9Raw(
             root, sanitize=sanitize,
             remove_hydrogens=remove_hydrogens, kekulize=kekulize,
-            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw
+            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw,
+            atom_types_repr=atom_types_repr
         )
 
         super().__init__(
@@ -260,7 +265,8 @@ class QM9(MolecularGraphsDataset):
             charges=raw_dataset.charges,
             hard_remove_hydrogens=hard_remove_hydrogens,
             include_pos=include_pos, include_charges=include_charges,
-            transform=transform, pre_transform=pre_transform, pre_filter=pre_filter
+            transform=transform, pre_transform=pre_transform, pre_filter=pre_filter,
+            atom_types_repr=atom_types_repr
         )
 
 class QM9Smiles(SmilesDataset):
@@ -275,7 +281,8 @@ class QM9Smiles(SmilesDataset):
             pre_transform_raw=None,
             pre_filter_raw=None,
             pre_transform=None,
-            pre_filter=None
+            pre_filter=None,
+            atom_types_repr=None
         ):
 
         if root is None:
@@ -285,7 +292,8 @@ class QM9Smiles(SmilesDataset):
         raw_dataset = QM9Raw(
             root, sanitize=sanitize,
             remove_hydrogens=remove_hydrogens, kekulize=kekulize,
-            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw
+            pre_transform=pre_transform_raw, pre_filter=pre_filter_raw,
+            atom_types_repr=atom_types_repr
         )
 
         super().__init__(
@@ -313,7 +321,116 @@ class QM9Resources(DataResources):
             pre_transform=None,
             pre_filter=None,
             pre_transform_raw=None,
-            pre_filter_raw=None
+            pre_filter_raw=None,
+            atom_types_repr: str = 'default',
+        ):
+
+        super().__init__()
+
+        self.root = root
+        
+        self.qm9_cfg = {
+            'sanitize': sanitize,
+            'remove_hydrogens': remove_hydrogens,
+            'kekulize': kekulize,
+            'hard_remove_hydrogens': hard_remove_hydrogens,
+            'include_pos': include_pos,
+            'include_charges': include_charges,
+            'pre_transform_raw': pre_transform_raw,
+            'pre_filter_raw': pre_filter_raw,
+            'atom_types_repr': atom_types_repr,
+        }
+        self.smiles_cfg = {
+            'sanitize': sanitize,
+            'remove_hydrogens': remove_hydrogens,
+            'kekulize': kekulize
+        }
+
+        if random_splits is None:
+            random_splits = DEFAULT_SPLITS
+        self.random_splits = random_splits
+
+        self.preproc = {
+            'pre_transform': pre_transform,
+            'pre_filter': pre_filter
+        }
+
+        self._prepared = False
+
+
+    def prepare_data(self):
+
+        ds = QM9(self.root, **self.qm9_cfg)
+        ds_smiles = QM9Smiles(self.root, **self.smiles_cfg)
+
+        self.decoder = ds.mol_to_torch_converter
+        self.info_total = ds.stats
+
+        # if there is any pre_transform, resolve any transform adapter
+        self.preproc['pre_transform'] = self.transforms_to_pipeline(self.preproc['pre_transform'])
+        self.preproc['pre_filter'] = self.filters_to_pipeline(self.preproc['pre_filter'])
+
+        try: # try to get the split datasets
+
+            dss = {split: [
+                    QM9(self.root, split=split, **self.preproc, **self.qm9_cfg),
+                    QM9Smiles(self.root, split=split, **self.smiles_cfg)
+                ] for split in self.random_splits
+            }
+
+        except DatasetException: # if not possible, create the splits
+            print('Creating random splits for QM9 graphs and SMILES')
+
+            # reload dataset with preprocessing
+            if self.preproc['pre_transform'] is not None or self.preproc['pre_filter'] is not None:
+                print('Applying preprocessing to the whole dataset')
+                ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
+
+            dss = random_split_dataset([ds, ds_smiles], self.random_splits)
+
+        self.info = {split: self.wrap_dataset(d[0]).stats for split, d in dss.items()}
+
+        self._prepared = True
+
+
+    def get(self, resource: str=None, split: str=None, transform=None):
+        if not self._prepared:
+            self.prepare_data()
+
+        if resource == 'dataset':
+            return self.wrap_dataset(QM9(self.root, split=split, **self.preproc, **self.qm9_cfg), transform=transform)
+        elif resource == 'smiles':
+            return QM9Smiles(self.root, split=split, **self.smiles_cfg)
+        elif resource == 'decoder':
+            return self.decoder
+        elif resource == 'info':
+            return self.info[split] if split in self.info else self.info_total
+        else:
+            raise ValueError(f'Resource {resource} not found for QM9 dataset, choose between "dataset" and "smiles"')
+        
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}[resources=[dataset, smiles, decoder, info], splits={list(self.random_splits.keys())}]'
+    
+
+@reg_dataresources.register('qm9_mmff')
+class QM9Resources(DataResources):
+
+    def __init__(
+            self,
+            random_splits: Dict,
+            root: Optional[str] = None,
+            sanitize: bool = False,
+            remove_hydrogens: bool = True,
+            kekulize: bool = True,
+            hard_remove_hydrogens: bool = False,
+            include_pos: bool = False,
+            include_charges: bool = False,
+            pre_transform=None,
+            pre_filter=None,
+            pre_transform_raw=None,
+            pre_filter_raw=None,
+            atom_types_repr: str = 'default',
         ):
 
         super().__init__()
@@ -328,7 +445,8 @@ class QM9Resources(DataResources):
             'include_pos': include_pos,
             'include_charges': include_charges,
             'pre_transform_raw': pre_transform_raw,
-            'pre_filter_raw': pre_filter_raw
+            'pre_filter_raw': pre_filter_raw,
+            'atom_types_repr': atom_types_repr,
         }
         self.smiles_cfg = {
             'sanitize': sanitize,

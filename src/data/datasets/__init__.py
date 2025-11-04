@@ -1,6 +1,7 @@
 from src.utils.decorators import ClassRegister
 
 reg_dataresources = ClassRegister('DataResources')
+reg_atom_types_representation = ClassRegister('AtomTypesRepresentation')
 
 ####################### import datasets and dataresources ######################
 # QM9 taken from torch_geometric (raw is sdf file)
@@ -13,3 +14,7 @@ from .qm9_dig import *
 from .gdb13 import *
 # GEOM-DRUGS
 from .geom_drugs import *
+
+
+####################### import Atom Types Representation ######################
+from .atom_types_representation import *
