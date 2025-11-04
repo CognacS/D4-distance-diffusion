@@ -1,11 +1,11 @@
 # @package _global_
 defaults:
  - override /method/model/architecture@method.model.params.denoising.architecture: graph_transformer/gt_large_distance_orig
- - override /task: qm9_3d
+ - override /task: gdb13_3d_mmff
  - override /task/test: molecular_3d_pre
  - override /logger: wandb
  - override /method: d4
- - override /method/trainer: molecular_trainer
+ - override /method/trainer: molecular_trainer_gdb13
  - override /method/dataloader: [base_dataloader, batch_1536, workers_8]
  - override /method/callbacks: ckpt_ema_dist
 
@@ -13,9 +13,9 @@ method:
     model:
         params:
             generation:
-                batch_size: 1024
+                batch_size: 1536
             validation:
-                how_many_to_generate: 1024
+                how_many_to_generate: 1536
             embed_time: true
             features:
                 - indegree
@@ -43,8 +43,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: qm9-d4
+        group: gdb13-d4-mmff
 
+config_name: gdb13-d4-mmff
 
 mode: train+eval
 compile: true

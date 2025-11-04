@@ -1,21 +1,21 @@
 # @package _global_
 defaults:
  - override /method/model/architecture@method.model.params.denoising.architecture: graph_transformer/gt_large_distance_orig
- - override /task: zinc_3d
+ - override /task: qm9_3d_mmff
  - override /task/test: molecular_3d_pre
  - override /logger: wandb
  - override /method: d4
- - override /method/trainer: molecular_trainer_zinc
- - override /method/dataloader: [base_dataloader, batch_192, workers_8]
+ - override /method/trainer: molecular_trainer
+ - override /method/dataloader: [base_dataloader, batch_1536, workers_8]
  - override /method/callbacks: ckpt_ema_dist
 
 method:
     model:
         params:
             generation:
-                batch_size: 192
+                batch_size: 1024
             validation:
-                how_many_to_generate: 192
+                how_many_to_generate: 1024
             embed_time: true
             features:
                 - indegree
@@ -24,7 +24,6 @@ method:
                 - eigen_distance
             denoising:
                 distance_output_mode: conditional
-                #distance_output_mode: single
                 loss:
                     lambda_train_X: 1.0
                     lambda_train_C: 1.0
@@ -43,10 +42,10 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: zinc-d4
+        group: qm9-d4-mmff
 
-config_name: zinc-d4  
+config_name: qm9-d4-mmff
 
 mode: train+eval
-compile: false
+compile: true
 seed: 0
