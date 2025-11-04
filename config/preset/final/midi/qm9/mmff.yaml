@@ -47,9 +47,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: qm9-midi
+        group: qm9-midi-mmff
 
-config_name: qm9-midi
+config_name: qm9-midi-mmff
 
 seed: 0
 

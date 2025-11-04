@@ -44,9 +44,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: gdb13-midi
+        group: gdb13-midi-mmff
 
-config_name: gdb13-midi
+config_name: gdb13-midi-mmff
 
 seed: 0
 

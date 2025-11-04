@@ -44,9 +44,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: zinc-midi
+        group: zinc-midi-mmff
 
-config_name: zinc-midi
+config_name: zinc-midi-mmff
 
 seed: 0
 
