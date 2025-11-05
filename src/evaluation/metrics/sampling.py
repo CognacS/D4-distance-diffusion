@@ -1,3 +1,4 @@
+from copy import copy
 from typing import Dict, List, Tuple, Any, Optional, Union, Callable
 
 import numpy as np
@@ -385,8 +386,8 @@ class ValidMoleculeMetric(BaseSamplingMetric):
                 except Chem.rdchem.KekulizeException:
                     #print("Can't kekulize molecule")
                     all_smiles.append(None)
-                except: #AtomKekulizeException #TODO: drigoni remove print
-                    print("Can't atom kekulize molecule:", smiles)
+                except: #AtomKekulizeException
+                    #print("Can't atom kekulize molecule:", smiles)
                     all_smiles.append(None)
             else:
                 all_smiles.append(None)

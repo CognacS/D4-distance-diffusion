@@ -54,7 +54,7 @@ def kekulize_molecule(mol):
 def remove_hydrogens_from_molecule(mol):
     """ Remove hydrogens from a molecule.
     """
-    return Chem.RemoveHs(mol, sanitize=True)
+    return Chem.RemoveHs(mol, sanitize=False)
 
 
 def get_molecule_stats(mols: List[Chem.Mol], atom_types_repr: str= 'default'):

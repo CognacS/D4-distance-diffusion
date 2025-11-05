@@ -209,11 +209,11 @@ class QM9Raw(RawDataset):
                 skipped_sanitization += 1
                 continue
 
-            if self.kekulize:
-                mol = molutils.kekulize_molecule(mol)
-
             if self.remove_hydrogens:
                 mol = molutils.remove_hydrogens_from_molecule(mol)
+
+            if self.kekulize:
+                mol = molutils.kekulize_molecule(mol)
 
             final_mols.append(mol)
             final_props.append(prop)
