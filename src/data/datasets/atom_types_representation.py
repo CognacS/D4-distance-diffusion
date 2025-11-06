@@ -1,3 +1,4 @@
+import copy
 from pyparsing import ABC
 from rdkit import Chem
 from rdkit.Chem import ChemicalForceFields
@@ -40,8 +41,11 @@ class MMFFAtomTypeRepresentation(AtomTypeRepresentation):
     def __init__(self, molecule: Chem.Mol):
         super().__init__(molecule)
 
-        # creating force field properties
-        self.mmff_props = ChemicalForceFields.MMFFGetMoleculeProperties(self.molecule)
+        # creating force field properties. 
+        # NOTE: This function modify in place the molecule calling the sanitization function!
+        #       For this reason a deepcopy of the molecule should be passed to this function
+        self.deepcopy_molecule = copy.deepcopy(self.molecule)
+        self.mmff_props = ChemicalForceFields.MMFFGetMoleculeProperties(self.deepcopy_molecule)
 
     def encode_atom_representation(self, atom: Chem.rdchem.Atom) -> str:
         return f"{atom.GetSymbol()}_{self.mmff_props.GetMMFFAtomType(atom.GetIdx())}"
