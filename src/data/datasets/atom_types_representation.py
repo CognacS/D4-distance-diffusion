@@ -46,6 +46,9 @@ class MMFFAtomTypeRepresentation(AtomTypeRepresentation):
         #       For this reason a deepcopy of the molecule should be passed to this function
         self.deepcopy_molecule = copy.deepcopy(self.molecule)
         self.mmff_props = ChemicalForceFields.MMFFGetMoleculeProperties(self.deepcopy_molecule)
+        if self.mmff_props is None:
+            print("Original SMILES:", Chem.MolToSmiles(self.molecule))
+            raise ValueError("MMFF properties could not be computed for the given molecule.")
 
     def encode_atom_representation(self, atom: Chem.rdchem.Atom) -> str:
         return f"{atom.GetSymbol()}_{self.mmff_props.GetMMFFAtomType(atom.GetIdx())}"
