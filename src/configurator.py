@@ -614,6 +614,78 @@ class RunContext:
     def validate_context(self):
         pass
 
+    # def _setup_run_directory(self, config_name: str) -> Tuple[Path, int, str]:
+
+    #     self.resume = False
+
+    #     if self.enable_ckp:
+            
+    #         run_path = Path(CHECKPOINT_PATH, config_name)
+
+    #         ####################  IF PATH HAS TO BE LOADED  ####################
+    #         if self.load_ckp is not None:
+
+    #             self.resume = True
+
+    #             #####################  IF PATH IS A STRING  ####################
+    #             if isinstance(self.load_ckp, str):
+    #                 # load checkpoint from path
+    #                 # path already exists and is already well-formed
+    #                 run_path = Path(self.load_ckp)
+    #                 if not run_path.exists():
+    #                     raise ContextException(f'No run found matching the path {run_path}')
+    #                 version = run_path.name.split('_')[0][1:]
+    #                 run_id = run_path.name.split('_')[-1]
+
+    #             #####################  IF PATH IS AN INT  ######################
+    #             elif isinstance(self.load_ckp, int):
+    #                 # load checkpoint from version
+    #                 # path is taken from the configuration + version
+    #                 version = self.load_ckp
+    #                 # if the version is not specified, get the latest version
+    #                 if version == -1:
+    #                     # get latest version
+    #                     matched_run_path = list(run_path.glob('v*'))
+    #                     if len(matched_run_path) == 0:
+    #                         raise ContextException(f'No runs found matching the name {config_name}')
+    #                     version = max([int(p.name.split('_')[0][1:]) for p in matched_run_path])
+                
+    #                 # check that the run path exists (checking the prefix)
+    #                 matched_run_path = list(run_path.glob(f'v{version}_*'))
+    #                 if len(matched_run_path) == 0:
+    #                     raise ContextException(f'No run found matching the version {version}')
+    #                 if len(matched_run_path) > 1:
+    #                     raise ContextException(f'Multiple runs found matching the version {version}')
+
+    #                 # now we know the run exists, so we can get the run id
+    #                 run_path = matched_run_path[0]
+    #                 run_id = matched_run_path[0].name.split('_')[-1]
+
+    #         ###################  IF PATH HAS TO BE CREATED  ####################
+    #         else:
+    #             # generate run id
+    #             run_id = wandb.util.generate_id()
+    #             version = 0
+                
+    #             # check that the run path exists, and if not, create it
+    #             run_path.mkdir(parents=True, exist_ok=True)
+
+    #             # list all directories in the run path and check the latest version
+    #             matched_run_path = list(run_path.iterdir())
+    #             if len(matched_run_path) > 0:
+    #                 version = max([int(p.name.split('_')[0][1:]) for p in matched_run_path]) + 1
+                
+    #             # create the new run path
+    #             run_path = Path(run_path, f'v{version}_{run_id}')
+
+    #         version_dir = f'v{version}_{run_id}'
+
+    #         return run_path, version_dir, version, run_id
+        
+    #     else:
+    #         return None, None, 0, wandb.util.generate_id()
+
+    # new version where there are no version, but in the name, the character 'v' is followed by the seed
     def _setup_run_directory(self, config_name: str) -> Tuple[Path, int, str]:
 
         self.resume = False
@@ -634,28 +706,30 @@ class RunContext:
                     run_path = Path(self.load_ckp)
                     if not run_path.exists():
                         raise ContextException(f'No run found matching the path {run_path}')
-                    version = run_path.name.split('_')[0][1:]
+                    seed = run_path.name.split('_')[0][1:]
+                    version = run_path.name.split('_')[1][1:]
                     run_id = run_path.name.split('_')[-1]
 
                 #####################  IF PATH IS AN INT  ######################
                 elif isinstance(self.load_ckp, int):
                     # load checkpoint from version
                     # path is taken from the configuration + version
+                    seed = self.cfg['seed']
                     version = self.load_ckp
                     # if the version is not specified, get the latest version
                     if version == -1:
                         # get latest version
-                        matched_run_path = list(run_path.glob('v*'))
+                        matched_run_path = list(run_path.glob(f's{seed}_v*'))
                         if len(matched_run_path) == 0:
-                            raise ContextException(f'No runs found matching the name {config_name}')
-                        version = max([int(p.name.split('_')[0][1:]) for p in matched_run_path])
+                            raise ContextException(f'No runs found matching the seed {seed} and name {config_name}')
+                        version = max([int(p.name.split('_')[1][1:]) for p in matched_run_path])
                 
                     # check that the run path exists (checking the prefix)
-                    matched_run_path = list(run_path.glob(f'v{version}_*'))
+                    matched_run_path = list(run_path.glob(f's{seed}_v{version}_*'))
                     if len(matched_run_path) == 0:
-                        raise ContextException(f'No run found matching the version {version}')
+                        raise ContextException(f'No run found matching the seed {seed} and version {version}')
                     if len(matched_run_path) > 1:
-                        raise ContextException(f'Multiple runs found matching the version {version}')
+                        raise ContextException(f'Multiple runs found matching the seed {seed} and version {version}')
 
                     # now we know the run exists, so we can get the run id
                     run_path = matched_run_path[0]
@@ -665,7 +739,8 @@ class RunContext:
             else:
                 # generate run id
                 run_id = wandb.util.generate_id()
-                version = 0
+                seed = self.cfg['seed']
+                version = -1
                 
                 # check that the run path exists, and if not, create it
                 run_path.mkdir(parents=True, exist_ok=True)
@@ -673,19 +748,24 @@ class RunContext:
                 # list all directories in the run path and check the latest version
                 matched_run_path = list(run_path.iterdir())
                 if len(matched_run_path) > 0:
-                    version = max([int(p.name.split('_')[0][1:]) for p in matched_run_path]) + 1
+                    for p in matched_run_path:
+                        tmp_seed = int(p.name.split('_')[0][1:])
+                        if tmp_seed == seed:    # the seed matches
+                            tmp_version = int(p.name.split('_')[1][1:]) # searching for version
+                            if tmp_version > version:
+                                version = tmp_version
+                version = version + 1
                 
                 # create the new run path
-                run_path = Path(run_path, f'v{version}_{run_id}')
+                run_path = Path(run_path, f's{seed}_v{version}_{run_id}')
 
-            version_dir = f'v{version}_{run_id}'
+            version_dir = f's{seed}_v{version}_{run_id}'
 
             return run_path, version_dir, version, run_id
         
         else:
-            return None, None, 0, wandb.util.generate_id()
-
-
+            return None, None, self.cfg['seed'], wandb.util.generate_id()
+        
     ############################################################################
     #                          CONFIGURATION METHODS                           #
     ############################################################################
