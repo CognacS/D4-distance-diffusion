@@ -1,6 +1,6 @@
-name: gdb13_3d_atom_details
+name: gdb13_atom_details
 params:
-    root: 'datasets/gdb13_3d_atom_details'
+    root: 'datasets/gdb13_atom_details'
     random_splits:
         train: null
         valid: 0.1
