@@ -429,3 +429,117 @@ class GDB13Resources(DataResources):
 
     def __repr__(self):
         return f'{self.__class__.__name__}[resources=[dataset, smiles, decoder, info], splits={list(self.random_splits.keys())}]'
+    
+
+@reg_dataresources.register('gdb13_atom_details')
+class GDB13Resources(DataResources):
+
+    def __init__(
+            self,
+            random_splits: Dict,
+            root: Optional[str] = None,
+            sanitize: bool = False,
+            remove_hydrogens: bool = True,
+            kekulize: bool = True,
+            hard_remove_hydrogens: bool = False,
+            include_pos: bool = False,
+            include_charges: bool = False,
+            num_workers: int = 0,
+            chunksize: Optional[int] = None,
+            pre_transform=None,
+            pre_filter=None,
+            pre_transform_raw=None,
+            pre_filter_raw=None,
+            atom_types_repr: str = 'default',
+        ):
+
+        super().__init__()
+        
+        self.root = root
+        
+        self.gdb13_cfg = {
+            'sanitize': sanitize,
+            'remove_hydrogens': remove_hydrogens,
+            'kekulize': kekulize,
+            'hard_remove_hydrogens': hard_remove_hydrogens,
+            'include_pos': include_pos,
+            'include_charges': include_charges,
+            'num_workers': num_workers,
+            'chunksize': chunksize,
+            'pre_transform_raw': pre_transform_raw,
+            'pre_filter_raw': pre_filter_raw,
+            'atom_types_repr': atom_types_repr
+        }
+        self.smiles_cfg = {
+            'sanitize': sanitize,
+            'remove_hydrogens': remove_hydrogens,
+            'kekulize': kekulize,
+            'pre_transform_raw': pre_transform_raw,
+            'pre_filter_raw': pre_filter_raw
+        }
+
+        if random_splits is None:
+            random_splits = DEFAULT_SPLITS
+        self.random_splits = random_splits
+
+        self.preproc = {
+            'pre_transform': pre_transform,
+            'pre_filter': pre_filter
+        }
+
+        self._prepared = False
+
+
+    def prepare_data(self):
+
+        ds = GDB13(self.root, **self.gdb13_cfg)
+        ds_smiles = GDB13Smiles(self.root, **self.smiles_cfg)
+
+        self.decoder = ds.mol_to_torch_converter
+        self.info_total = ds.stats
+
+        # if there is any pre_transform, resolve any transform adapter
+        self.preproc['pre_transform'] = self.transforms_to_pipeline(self.preproc['pre_transform'])
+        self.preproc['pre_filter'] = self.filters_to_pipeline(self.preproc['pre_filter'])
+
+        try: # try to get the split datasets
+
+            dss = {split: [
+                    GDB13(self.root, split=split, **self.preproc, **self.gdb13_cfg),
+                    GDB13Smiles(self.root, split=split, **self.smiles_cfg)
+                ] for split in self.random_splits
+            }
+
+        except DatasetException: # if not possible, create the splits
+            print('Creating random splits for GDB13 graphs and SMILES')
+
+            # reload dataset with preprocessing
+            if self.preproc['pre_transform'] is not None:
+                print('Applying preprocessing to the whole dataset')
+                ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
+
+            dss = random_split_dataset([ds, ds_smiles], self.random_splits)
+
+        self.info = {split: self.wrap_dataset(d[0]).stats for split, d in dss.items()}
+
+        self._prepared = True
+
+
+    def get(self, resource: str=None, split: str=None, transform=None):
+        if not self._prepared:
+            self.prepare_data()
+
+        if resource == 'dataset':
+            return self.wrap_dataset(GDB13(self.root, split=split, **self.preproc, **self.gdb13_cfg), transform=transform)
+        elif resource == 'smiles':
+            return GDB13Smiles(self.root, split=split, **self.smiles_cfg)
+        elif resource == 'decoder':
+            return self.decoder
+        elif resource == 'info':
+            return self.info[split] if split in self.info else self.info_total
+        else:
+            raise ValueError(f'Resource {resource} not found for GDB13 dataset, choose between "dataset" and "smiles"')
+        
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}[resources=[dataset, smiles, decoder, info], splits={list(self.random_splits.keys())}]'

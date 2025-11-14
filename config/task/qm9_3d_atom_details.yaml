@@ -1,0 +1,4 @@
+defaults:
+  - dataset: qm9_3d_atom_details
+  - pre_transform: to_onehot_mols
+  - test: molecular_3d

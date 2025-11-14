@@ -55,3 +55,29 @@ class MMFFAtomTypeRepresentation(AtomTypeRepresentation):
 
     def decode_atom_representation(self, atom: str) -> str:
         return atom.split("_")[0]
+    
+
+@reg_atom_types_representation.register("atom_details")
+class MMFFAtomTypeRepresentation(AtomTypeRepresentation):
+    """Base class for atom representation."""
+
+    def __init__(self, molecule: Chem.Mol):
+        super().__init__(molecule)
+        self.ordered_keys = ["Element", "In Ring", "Aromatic", "Hybridization", "Formal Charge"]
+
+    def encode_atom_representation(self, atom: Chem.rdchem.Atom) -> str:
+        info = {
+            # "Index": atom.GetIdx(),
+            "Element": atom.GetSymbol(),
+            "In Ring": atom.IsInRing(),                     # se l'atomo fa parte di un anello
+            "Aromatic": atom.GetIsAromatic(),               # se l'atomo fa parte di un anello aromatico
+            "Hybridization": atom.GetHybridization().name,  # impatta il numero di legami che ha e potrebbe fare
+            "Formal Charge": atom.GetFormalCharge(),        # carica formale dell'atomo
+        }
+        ordered_values = [info[key] for key in self.ordered_keys]
+        string = "_".join([str(value) for value in ordered_values])
+        return string
+        
+
+    def decode_atom_representation(self, atom: str) -> str:
+        return atom.split("_")[0]

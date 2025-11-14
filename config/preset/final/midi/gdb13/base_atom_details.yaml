@@ -1,0 +1,54 @@
+# @package _global_
+defaults:
+ - override /task: gdb13_3d_atom_details
+ - override /logger: wandb
+ - override /method: midi
+ - override /method/trainer: molecular_trainer_gdb13
+ - override /method/dataloader: [base_dataloader, batch_2048, workers_8]
+ - override /method/callbacks: ckpt_orig_midi
+
+method:
+    model:
+        params:
+            cfg:
+                general:
+                    name : 'noh_ada3'
+                    gpus : 1
+                    wandb: 'online'
+                    test_only: null
+                    resume: null
+                    evaluate_all_checkpoints: False
+                    final_model_samples_to_generate: 10000
+                    num_final_sampling: 5
+                train:
+                    n_epochs: 1000
+                    batch_size: 2048
+                    save_model: True
+                    num_workers: 4
+                    lr: 0.0001
+                model:
+                    n_layers: 10
+                    lambda_train: [5, 0.4, 1, 2, 0]
+                    nu:
+                        p: 2.5
+                        x: 1
+                        c: 1
+                        e: 1.5
+                        y: 1
+                dataset:
+                    remove_h: True
+                    pin_memory: True
+            validation:
+                how_many_to_generate: 2048
+
+logger:
+    WandbLogger:
+        project: d4-hparams
+        group: gdb13-midi-atom_details
+
+config_name: gdb13-midi-atom_details
+
+seed: 0
+
+mode: train+eval
+compile: false
