@@ -1,0 +1,16 @@
+name: zinc250k_atom_details
+params:
+    root: 'datasets/zinc250k_atom_details'
+    random_splits:
+        train: null
+        valid: 0.16 # 0.8 * 0.2
+        # test is predefined
+    include_pos: true
+    include_charges: true
+    sanitize: true
+    kekulize: true
+    remove_hydrogens: true
+    hard_remove_hydrogens: false
+    num_workers: 8
+    chunksize: 2000
+    atom_types_repr: 'atom_details'
