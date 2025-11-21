@@ -262,3 +262,59 @@ class ZincResources(BaseDigResources):
             pre_filter=pre_filter
         )
         
+
+@reg_dataresources.register('zinc250k_atom_details')
+class ZincResources(BaseDigResources):
+
+    def __init__(
+            self,
+            random_splits: Dict,
+            root: Optional[str] = None,
+            sanitize: bool = False,
+            remove_hydrogens: bool = True,
+            kekulize: bool = True,
+            hard_remove_hydrogens: bool = False,
+            include_pos: bool = False,
+            include_charges: bool = False,
+            num_workers: int = 0,
+            chunksize: Optional[int] = None,
+            pre_transform=None,
+            pre_filter=None,
+            pre_transform_raw=None,
+            pre_filter_raw=None,
+            atom_types_repr: str = 'default',
+        ):
+        
+        zinc_cfg = {
+            'sanitize': sanitize,
+            'remove_hydrogens': remove_hydrogens,
+            'kekulize': kekulize,
+            'hard_remove_hydrogens': hard_remove_hydrogens,
+            'include_pos': include_pos,
+            'include_charges': include_charges,
+            'num_workers': num_workers,
+            'chunksize': chunksize,
+            'pre_transform_raw': pre_transform_raw,
+            'pre_filter_raw': pre_filter_raw,
+            'atom_types_repr': atom_types_repr,
+        }
+        smiles_cfg = {
+            'sanitize': sanitize,
+            'remove_hydrogens': remove_hydrogens,
+            'kekulize': kekulize,
+            'include_pos': include_pos,
+            'pre_transform_raw': pre_transform_raw,
+            'pre_filter_raw': pre_filter_raw
+        }
+
+        super().__init__(
+            root=root,
+            random_splits=random_splits,
+            dataset_cfg=zinc_cfg,
+            smiles_cfg=smiles_cfg,
+            dataset_cls=Zinc,
+            smiles_cls=ZincSmiles,
+            pre_transform=pre_transform,
+            pre_filter=pre_filter
+        )
+        
