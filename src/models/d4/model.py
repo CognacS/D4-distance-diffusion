@@ -707,17 +707,21 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         metrics = {
             **self.metrics[which]
         }
+        generated_samples = None
 
         if assignment is not None:
         
             batch_size = self.generation_config['batch_size']
         
             # compute sampling metrics
-            assignment_results, hists, *others = self.perform_assignment(
+            assignment_output = self.perform_assignment(
                 assignment=assignment, other_metrics=metrics,
                 sampling_kwargs={'batch_size': batch_size},
                 return_samples=(which == KEY_TEST),
             )
+            assignment_results, hists = assignment_output[:2]
+            if which == KEY_TEST and len(assignment_output) > 2:
+                generated_samples = assignment_output[2]
             
             # add the assignment results to the metrics
             metrics.update(assignment_results)
@@ -736,17 +740,14 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         self.log_dict(to_log)
         
-        if which == KEY_TEST:
+        if which == KEY_TEST and generated_samples is not None:
             from pathlib import Path
-            ckp_path = Path(self.trainer.log_dir)
-            # extract the path, without the checkpoint name
-            if ckp_path != '':
-                ckp_path = ckp_path.parent.parent
-                from src.configurator import store_graphs
-                store_graphs(
-                    graphs = others[0],
-                    path = ckp_path
-                )
+            run_path = Path(self.trainer.default_root_dir)
+            from src.configurator import store_graphs
+            store_graphs(
+                graphs = generated_samples,
+                path = run_path
+            )
 
 
     ############################################################################
