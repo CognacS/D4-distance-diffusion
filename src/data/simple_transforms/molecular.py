@@ -251,6 +251,7 @@ def build_graph_from_molecule(
         mol: Chem.Mol,
         atom_encoder: Union[Dict[int, str], Dict[str, int]],
         bond_encoder: Union[Dict[int, str], Dict[str, int]],
+        atom_types_repr_encoder: Optional[Union[Dict[int, str], Dict[str, int]]] = None,
         charge_encoder: Optional[Union[Dict[int, float], Dict[float, int]]] = None,
         hard_remove_hydrogens: bool=False,
         include_pos: bool=False,
@@ -276,6 +277,7 @@ def build_graph_from_molecule(
 
     # build graph from molecule
     atom_types = []
+    auxiliary_atom_types = []
     edge_index = []
     edge_types = []
 
@@ -283,8 +285,11 @@ def build_graph_from_molecule(
     mol_encoder = reg_atom_types_representation.get_instance(atom_types_repr, molecule=mol)
 
     for atom in mol.GetAtoms():
-        atom_label = mol_encoder.encode_atom_representation(atom)
+        atom_label = mol_encoder.get_atom_label(atom)
         atom_types.append(atom_encoder[atom_label])
+        if atom_types_repr_encoder is not None and mol_encoder.has_auxiliary_representation():
+            auxiliary_label = mol_encoder.get_auxiliary_representation(atom)
+            auxiliary_atom_types.append(atom_types_repr_encoder[auxiliary_label])
     
 
     for bond in mol.GetBonds():
@@ -315,6 +320,12 @@ def build_graph_from_molecule(
     edge_index, edge_attr = to_undirected(edge_index, edge_attr, num_nodes=x.size(0))
     
     addons = {}
+
+    if len(auxiliary_atom_types) > 0 and mol_encoder.has_auxiliary_representation():
+        auxiliary_atom_types = torch.tensor(auxiliary_atom_types, dtype=torch.long)
+        if hard_remove_hydrogens:
+            auxiliary_atom_types = auxiliary_atom_types[to_keep]
+        addons[mol_encoder.auxiliary_node_attr_name] = auxiliary_atom_types
     
     if include_pos:
         addons['node_pos'] = pos
@@ -356,6 +367,7 @@ class GraphToMoleculeConverter:
             self,
             atom_decoder: Union[Dict[int, str], Dict[str, int]],
             bond_decoder: Union[Dict[int, str], Dict[str, int]],
+            atom_types_repr_decoder: Optional[Union[Dict[int, str], Dict[str, int]]]=None,
             charge_decoder: Optional[Union[Dict[int, float], Dict[float, int]]]=None,
             relaxed: bool=False,
             post_hoc_mols_fix: bool=False,
@@ -376,6 +388,12 @@ class GraphToMoleculeConverter:
         self.atom_encoder = check_decoder(atom_decoder, str)
         self.bond_decoder = check_decoder(bond_decoder, int)
         self.bond_encoder = check_decoder(bond_decoder, str)
+        if atom_types_repr_decoder is not None:
+            self.atom_types_repr_decoder = check_decoder(atom_types_repr_decoder, int)
+            self.atom_types_repr_encoder = check_decoder(atom_types_repr_decoder, str)
+        else:
+            self.atom_types_repr_decoder = None
+            self.atom_types_repr_encoder = None
         if charge_decoder is not None and self.include_charges:
             self.charge_decoder = check_decoder(charge_decoder, int)
             self.charge_encoder = check_decoder(charge_decoder, float)
@@ -497,6 +515,7 @@ class GraphToMoleculeConverter:
                 mol,
                 atom_encoder = self.atom_encoder,
                 bond_encoder = self.bond_encoder,
+                atom_types_repr_encoder = self.atom_types_repr_encoder,
                 charge_encoder= self.charge_encoder,
                 hard_remove_hydrogens = hard_remove_hydrogens,
                 include_pos = self.include_pos,

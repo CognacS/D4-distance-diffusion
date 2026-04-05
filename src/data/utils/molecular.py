@@ -8,6 +8,7 @@ import copy
 
 from src.data.simple_transforms.molecular import BOND_TYPES_REAL_REV, BOND_TYPES_REV
 from src.data.datasets import reg_atom_types_representation
+from src.data.datasets.atom_types_representation import ATOM_TYPES_REPR_STATS_KEY
 
 
 RDLogger.DisableLog('rdApp.*')
@@ -71,6 +72,7 @@ def get_molecule_stats(mols: List[Chem.Mol], atom_types_repr: str= 'default'):
     """
     
     atoms = set()
+    auxiliary_atom_types = set()
     bonds = set()
     charges = set()
     l_num_atoms = []
@@ -85,7 +87,10 @@ def get_molecule_stats(mols: List[Chem.Mol], atom_types_repr: str= 'default'):
         mol_encoder = reg_atom_types_representation.get_instance(atom_types_repr, molecule=mol)
 
         for atom in mol.GetAtoms():
-            atoms.add(mol_encoder.encode_atom_representation(atom))
+            atoms.add(mol_encoder.get_atom_label(atom))
+            auxiliary_representation = mol_encoder.get_auxiliary_representation(atom)
+            if auxiliary_representation is not None:
+                auxiliary_atom_types.add(auxiliary_representation)
             charges.add(float(atom.GetFormalCharge()))
 
         for bond in mol.GetBonds():
@@ -112,5 +117,8 @@ def get_molecule_stats(mols: List[Chem.Mol], atom_types_repr: str= 'default'):
         'bond_types': bonds,
         'charges': charges
     }
+
+    if len(auxiliary_atom_types) > 0:
+        ret_dict[ATOM_TYPES_REPR_STATS_KEY] = sorted(list(auxiliary_atom_types))
 
     return ret_dict

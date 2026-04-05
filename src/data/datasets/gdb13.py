@@ -17,6 +17,7 @@ from torch_geometric.datasets.qm9 import conversion
 
 from src.data.datasets.core import RawDataset, DataResources, DatasetException, DEFAULT_DATASET_PATH, DEFAULT_SPLITS
 from src.data.datasets.molecular import MolecularGraphsDataset, SmilesDataset, ExtendedMolecularDatasetRaw
+from src.data.datasets.atom_types_representation import ATOM_TYPES_REPR_STATS_KEY
 
 from copy import copy
 
@@ -109,6 +110,7 @@ class GDB13Raw(ExtendedMolecularDatasetRaw):
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
         self.charges = self.stats['charges']
+        self.atom_types_repr_values = self.stats.get(ATOM_TYPES_REPR_STATS_KEY)
         
         # store data in files
         self.save(self.stats, self.raw_paths[2])
