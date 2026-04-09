@@ -19,6 +19,7 @@ from rdkit import DistanceGeometry
 from rdkit.Chem import AllChem
 from rdkit.Chem import ChemicalForceFields
 import networkx as nx
+from collections import OrderedDict
 
 from src.data.simple_transforms import batched
 from src.data.datasets import reg_atom_types_representation
