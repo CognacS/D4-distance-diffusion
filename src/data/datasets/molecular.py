@@ -14,7 +14,7 @@ from src.data.simple_transforms.molecular import GraphToMoleculeConverter, mol2s
 from src.data.utils.graphs import get_torch_graphs_stats
 from src.datatypes.sparse import SparseGraph
 from src.data.simple_transforms.molecular import verify_and_compute_3d_conformer
-from src.data.datasets.atom_types_representation import ATOM_TYPES_REPR_NODE_ATTR, ATOM_TYPES_REPR_STATS_KEY
+from src.data.datasets.atom_types_representation import AUXILIARY_NODE_STATES_STATS_KEY
 
 import src.data.utils.molecular as molutils
 
@@ -60,22 +60,25 @@ class MolecularGraphsDataset(ProcessedDataset):
         # assign numbers to each atom and bond type
         atom_decoder = {atom: i for i, atom in enumerate(atom_types)}
         bond_decoder = {bond: i for i, bond in enumerate(bond_types)}
-        atom_types_repr_values = getattr(raw_mol_dataset, 'atom_types_repr_values', None)
-        if atom_types_repr_values is None and hasattr(raw_mol_dataset, 'stats'):
-            atom_types_repr_values = raw_mol_dataset.stats.get(ATOM_TYPES_REPR_STATS_KEY)
-        if atom_types_repr_values is not None:
-            atom_types_repr_decoder = {value: i for i, value in enumerate(atom_types_repr_values)}
+        auxiliary_node_state_values = getattr(raw_mol_dataset, 'auxiliary_node_state_values', None)
+        if auxiliary_node_state_values is None and hasattr(raw_mol_dataset, 'stats'):
+            auxiliary_node_state_values = raw_mol_dataset.stats.get(AUXILIARY_NODE_STATES_STATS_KEY)
+        if auxiliary_node_state_values is not None:
+            auxiliary_node_state_decoders = {
+                name: {value: i for i, value in enumerate(values)}
+                for name, values in auxiliary_node_state_values.items()
+            }
         else:
-            atom_types_repr_decoder = None
+            auxiliary_node_state_decoders = None
         if charges is not None:
             charge_decoder = {charge: i for i, charge in enumerate(charges)}
 
-        self.atom_types_repr_values = atom_types_repr_values
+        self.auxiliary_node_state_values = auxiliary_node_state_values
 
         self.mol_to_torch_converter = GraphToMoleculeConverter(
             atom_decoder = atom_decoder,
             bond_decoder = bond_decoder,
-            atom_types_repr_decoder = atom_types_repr_decoder,
+            auxiliary_node_state_decoders = auxiliary_node_state_decoders,
             charge_decoder = charge_decoder if charges is not None else None,
             include_pos = include_pos,
             include_charges = include_charges,
@@ -107,8 +110,8 @@ class MolecularGraphsDataset(ProcessedDataset):
             'x': len(self.mol_to_torch_converter.atom_decoder),
             'edge_attr': len(self.mol_to_torch_converter.bond_decoder),
         }
-        if self.mol_to_torch_converter.atom_types_repr_decoder is not None:
-            num_cls[ATOM_TYPES_REPR_NODE_ATTR] = len(self.mol_to_torch_converter.atom_types_repr_decoder)
+        for name, decoder in self.mol_to_torch_converter.auxiliary_node_state_decoders.items():
+            num_cls[name] = len(decoder)
         if self.include_charges and self.mol_to_torch_converter.charge_decoder is not None:
             num_cls['node_charges'] = len(self.mol_to_torch_converter.charge_decoder)
 
@@ -192,17 +195,18 @@ class MolecularGraphsDataset(ProcessedDataset):
             'x': len(self.mol_to_torch_converter.atom_decoder),
             'edge_attr': len(self.mol_to_torch_converter.bond_decoder),
         }
-        if self.mol_to_torch_converter.atom_types_repr_decoder is not None:
-            num_cls[ATOM_TYPES_REPR_NODE_ATTR] = len(self.mol_to_torch_converter.atom_types_repr_decoder)
+        for name, decoder in self.mol_to_torch_converter.auxiliary_node_state_decoders.items():
+            num_cls[name] = len(decoder)
 
         self.stats = {
             'num_cls_nodes': num_cls['x'],
             'num_cls_edges': num_cls['edge_attr'],
             'num_cls_properties': graphs[0].y.size(0) if hasattr(graphs[0], 'y') and graphs[0].y is not None else 0
         }
-        if self.atom_types_repr_values is not None:
-            self.stats[ATOM_TYPES_REPR_STATS_KEY] = self.atom_types_repr_values
-            self.stats['num_cls_atom_types_repr'] = num_cls[ATOM_TYPES_REPR_NODE_ATTR]
+        if self.auxiliary_node_state_values is not None:
+            self.stats[AUXILIARY_NODE_STATES_STATS_KEY] = self.auxiliary_node_state_values
+            for name, values in self.auxiliary_node_state_values.items():
+                self.stats[f'num_cls_{name}'] = len(values)
         if self.include_charges and self.mol_to_torch_converter.charge_decoder is not None:
             num_cls['node_charges'] = len(self.mol_to_torch_converter.charge_decoder)
             self.stats['num_cls_charges'] = num_cls['node_charges']
@@ -337,7 +341,7 @@ class MolecularDataset(RawDataset):
             self.atom_types = self.stats['atom_types']
             self.bond_types = self.stats['bond_types']
             self.charges = self.stats['charges'] if 'charges' in self.stats else None
-            self.atom_types_repr_values = self.stats.get(ATOM_TYPES_REPR_STATS_KEY)
+            self.auxiliary_node_state_values = self.stats.get(AUXILIARY_NODE_STATES_STATS_KEY)
 
 
     def subset_from(self, indices: List[int], name: str):
@@ -361,13 +365,13 @@ class MolecularDataset(RawDataset):
         stats_new['atom_types'] = self.atom_types # use old atom types
         stats_new['bond_types'] = self.bond_types # use old bond types
         stats_new['charges'] = self.charges # use old charges
-        if self.atom_types_repr_values is not None:
-            stats_new[ATOM_TYPES_REPR_STATS_KEY] = self.atom_types_repr_values
+        if self.auxiliary_node_state_values is not None:
+            stats_new[AUXILIARY_NODE_STATES_STATS_KEY] = self.auxiliary_node_state_values
         subset.stats = stats_new
         subset.atom_types = self.atom_types
         subset.bond_types = self.bond_types
         subset.charges = self.charges
-        subset.atom_types_repr_values = self.atom_types_repr_values
+        subset.auxiliary_node_state_values = self.auxiliary_node_state_values
         
         # store data in files
         subset.save(subset.stats, subset.raw_paths[2])
@@ -418,7 +422,7 @@ class MolecularDataset(RawDataset):
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
         self.charges = self.stats['charges']
-        self.atom_types_repr_values = self.stats.get(ATOM_TYPES_REPR_STATS_KEY)
+        self.auxiliary_node_state_values = self.stats.get(AUXILIARY_NODE_STATES_STATS_KEY)
         
         # store data in files
         self.save(self.stats, self.raw_paths[2])
@@ -545,7 +549,7 @@ class ExtendedMolecularDatasetRaw(RawDataset):
             self.atom_types = self.stats['atom_types']
             self.bond_types = self.stats['bond_types']
             self.charges = self.stats['charges'] if 'charges' in self.stats else None
-            self.atom_types_repr_values = self.stats.get(ATOM_TYPES_REPR_STATS_KEY)
+            self.auxiliary_node_state_values = self.stats.get(AUXILIARY_NODE_STATES_STATS_KEY)
 
 
     def subset_from(self, indices: List[int], name: str, mols_path: str, props_path: str, stats_path: str):
@@ -569,13 +573,13 @@ class ExtendedMolecularDatasetRaw(RawDataset):
         stats_new['atom_types'] = self.atom_types # use old atom types
         stats_new['bond_types'] = self.bond_types # use old bond types
         stats_new['charges'] = self.charges # use old charges
-        if self.atom_types_repr_values is not None:
-            stats_new[ATOM_TYPES_REPR_STATS_KEY] = self.atom_types_repr_values
+        if self.auxiliary_node_state_values is not None:
+            stats_new[AUXILIARY_NODE_STATES_STATS_KEY] = self.auxiliary_node_state_values
         subset.stats = stats_new
         subset.atom_types = self.atom_types
         subset.bond_types = self.bond_types
         subset.charges = self.charges
-        subset.atom_types_repr_values = self.atom_types_repr_values
+        subset.auxiliary_node_state_values = self.auxiliary_node_state_values
         
         # store data in files
         subset.save(subset.stats, stats_path)

@@ -28,3 +28,6 @@ validation:
 
 features:
     - indegree
+
+dataset_auxiliary_node_states:
+    include_in_diffusion: false

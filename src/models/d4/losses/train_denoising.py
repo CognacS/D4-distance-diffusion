@@ -179,6 +179,7 @@ class TrainLossDistance(nn.Module):
             lambda_train_E: float = 1.,
             lambda_train_C: float = 1.,
             lambda_train_D: float = 1.,
+            lambda_train_auxiliary_node_states: float = 1.,
             lambda_eigenvalues_regularization: float = 0.,
             **kwargs
         ):
@@ -187,6 +188,7 @@ class TrainLossDistance(nn.Module):
         self.lambda_train_E = lambda_train_E
         self.lambda_train_C = lambda_train_C
         self.lambda_train_D = lambda_train_D
+        self.lambda_train_auxiliary_node_states = lambda_train_auxiliary_node_states
         self.lambda_eigenvalues_regularization = lambda_eigenvalues_regularization
 
     def forward(
@@ -205,8 +207,21 @@ class TrainLossDistance(nn.Module):
         true_y : tensor -- (bs, )
         log : boolean. """
 
-        pred_x, pred_e, pred_dist, pred_c, nodes_mask, triang_edge_mask, full_edge_dist = pred_values
-        true_x, true_e, true_dist, true_c = true_values
+        pred_x = pred_values['x']
+        pred_e = pred_values['edge_adjmat']
+        pred_dist = pred_values['edge_dist']
+        pred_c = pred_values['node_charges']
+        nodes_mask = pred_values['node_mask']
+        triang_edge_mask = pred_values['triang_edge_mask']
+        full_edge_dist = pred_values['full_edge_dist']
+
+        true_x = true_values['x']
+        true_e = true_values['edge_adjmat']
+        true_dist = true_values['edge_dist']
+        true_c = true_values['node_charges']
+
+        pred_auxiliary_node_states = pred_values.get('auxiliary_node_states', {})
+        true_auxiliary_node_states = true_values.get('auxiliary_node_states', {})
 
         # compute cross entropy loss
         reduction = 'mean' if reduce else 'none'
@@ -222,6 +237,23 @@ class TrainLossDistance(nn.Module):
             self.lambda_train_E * loss_e.mean(),
             self.lambda_train_D * loss_dist.mean()
         ])
+
+        auxiliary_node_state_losses = {}
+        if len(true_auxiliary_node_states) > 0:
+            for name, true_aux_state in true_auxiliary_node_states.items():
+                pred_aux_state = pred_auxiliary_node_states[name]
+                auxiliary_node_state_losses[name] = F.cross_entropy(
+                    pred_aux_state,
+                    true_aux_state,
+                    reduction=reduction,
+                ) if true_aux_state.numel() > 0 else torch.zeros(1, device=pred_aux_state.device)
+
+            auxiliary_node_state_loss = torch.stack([
+                loss.mean() for loss in auxiliary_node_state_losses.values()
+            ]).mean()
+            total_loss = total_loss + self.lambda_train_auxiliary_node_states * auxiliary_node_state_loss
+        else:
+            auxiliary_node_state_loss = None
         
         if self.lambda_eigenvalues_regularization > 0:
             edge_mask = nodes_mask.unsqueeze(1) * nodes_mask.unsqueeze(2)
@@ -239,6 +271,10 @@ class TrainLossDistance(nn.Module):
                 labels.DENOISE_MSE_DIST: loss_dist.detach(),
                 labels.DENOISE_TOTAL: total_loss.detach()
             }
+            if auxiliary_node_state_loss is not None:
+                to_log[labels.DENOISE_CE_AUXILIARY_NODE_STATES] = auxiliary_node_state_loss.detach()
+                for name, loss in auxiliary_node_state_losses.items():
+                    to_log[labels.denoise_ce_auxiliary_node_state(name)] = loss.detach()
             if self.lambda_eigenvalues_regularization > 0:
                 to_log['denoise_eigenvals_reg'] = loss_eigenvalues.detach()
             return total_loss, to_log

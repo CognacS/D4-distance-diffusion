@@ -8,7 +8,7 @@ import copy
 
 from src.data.simple_transforms.molecular import BOND_TYPES_REAL_REV, BOND_TYPES_REV
 from src.data.datasets import reg_atom_types_representation
-from src.data.datasets.atom_types_representation import ATOM_TYPES_REPR_STATS_KEY
+from src.data.datasets.atom_types_representation import AUXILIARY_NODE_STATES_STATS_KEY
 
 
 RDLogger.DisableLog('rdApp.*')
@@ -72,7 +72,7 @@ def get_molecule_stats(mols: List[Chem.Mol], atom_types_repr: str= 'default'):
     """
     
     atoms = set()
-    auxiliary_atom_types = set()
+    auxiliary_node_state_values = {}
     bonds = set()
     charges = set()
     l_num_atoms = []
@@ -88,9 +88,9 @@ def get_molecule_stats(mols: List[Chem.Mol], atom_types_repr: str= 'default'):
 
         for atom in mol.GetAtoms():
             atoms.add(mol_encoder.get_atom_label(atom))
-            auxiliary_representation = mol_encoder.get_auxiliary_representation(atom)
-            if auxiliary_representation is not None:
-                auxiliary_atom_types.add(auxiliary_representation)
+            auxiliary_features = mol_encoder.get_auxiliary_node_features(atom)
+            for name, value in auxiliary_features.items():
+                auxiliary_node_state_values.setdefault(name, set()).add(value)
             charges.add(float(atom.GetFormalCharge()))
 
         for bond in mol.GetBonds():
@@ -118,7 +118,10 @@ def get_molecule_stats(mols: List[Chem.Mol], atom_types_repr: str= 'default'):
         'charges': charges
     }
 
-    if len(auxiliary_atom_types) > 0:
-        ret_dict[ATOM_TYPES_REPR_STATS_KEY] = sorted(list(auxiliary_atom_types))
+    if len(auxiliary_node_state_values) > 0:
+        ret_dict[AUXILIARY_NODE_STATES_STATS_KEY] = {
+            name: sorted(list(values), key=lambda value: (not str(value).lstrip('-').isdigit(), int(value) if str(value).lstrip('-').isdigit() else str(value)))
+            for name, values in auxiliary_node_state_values.items()
+        }
 
     return ret_dict

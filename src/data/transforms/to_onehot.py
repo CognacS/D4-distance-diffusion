@@ -3,7 +3,6 @@ from typing import Dict
 from torch_geometric.transforms import BaseTransform
 from src.datatypes.sparse import SparseGraph
 from src.data.transforms.core import TransformAdapter
-
 from src.datatypes.utils import one_hot
 
 from src.data.transforms import reg_transforms
@@ -26,11 +25,19 @@ class ToOneHotGraph(BaseTransform):
 @reg_transforms.register('to_onehot_graph')
 class ToOneHotGraphAdapter(TransformAdapter):
 
-    def instantiate(self, data_resources, **kwargs) -> BaseTransform:
+    def instantiate(self, **kwargs) -> BaseTransform:
+        data_resources = kwargs['data_resources']
         info = data_resources.info_total
 
+        attrs_to_num_cls = {k: info[v] for k, v in self.map.items() if v in info}
+
+        for key, value in info.items():
+            if key.startswith('num_cls_node_'):
+                attr_name = key.removeprefix('num_cls_')
+                attrs_to_num_cls[attr_name] = value
+
         tr = ToOneHotGraph(
-            {k: info[v] for k, v in self.map.items()}
+            attrs_to_num_cls
         )
 
         return tr
@@ -61,7 +68,8 @@ class ToOneHotAdapter(TransformAdapter):
         super().__init__(map, **kwargs)
         self.attr_name = attr_name
 
-    def instantiate(self, data_resources, **kwargs) -> BaseTransform:
+    def instantiate(self, **kwargs) -> BaseTransform:
+        data_resources = kwargs['data_resources']
         info = data_resources.info_total
 
         tr = ToOneHot(

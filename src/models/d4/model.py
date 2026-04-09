@@ -37,6 +37,7 @@ from src.datatypes import (
 )
 from src.datatypes.dense import DenseGraph, DenseEdges, DenseNodes
 from src.datatypes.sparse import SparseGraph, SparseEdges
+from src.datatypes.utils import one_hot
 
 ################  NOISE IMPORTS  #################
 
@@ -69,7 +70,6 @@ from src.noise.graph_diffusion import GraphDiffusionProcess
 from src.noise.multimodal_diffusion import ChainedNoiseProcess
 
 from src.noise.discrete_diffusion import DiscreteDiffusionProcess
-from src.noise.graph_diffusion import GraphDiffusionProcess
 from src.noise.graph_cont_diffusion import DistanceGaussianDiffusionProcess
 
 from src.models.d4 import labels
@@ -81,6 +81,10 @@ from torchmetrics.regression import MeanAbsoluteError
 from src.models.architectures.distributions.empirical import EmpiricalSampler
 from pytorch_lightning.loggers import WandbLogger
 import collections
+from src.data.datasets.atom_types_representation import (
+    infer_auxiliary_node_state_marginals,
+    infer_auxiliary_node_state_values,
+)
 
 
 KEY_TRAIN = 'TRAIN'
@@ -103,6 +107,9 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             
             # features configurations
             features: Dict = None,
+
+            # optional dataset-provided node states
+            dataset_auxiliary_node_states: Dict = None,
 
             # generation configuration
             # e.g., conditional, batch size
@@ -147,6 +154,26 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         # setup additional features
         self.additional_features: List[Feature] = get_features_list(features) if features else []
+        self.dataset_auxiliary_node_states_config = dataset_auxiliary_node_states or {}
+        self.include_dataset_auxiliary_node_states = self.dataset_auxiliary_node_states_config.get('include_in_diffusion', False)
+        if self.include_dataset_auxiliary_node_states:
+            self.auxiliary_node_state_values = infer_auxiliary_node_state_values(dataset_info)
+            if len(self.auxiliary_node_state_values) == 0:
+                raise ValueError(
+                    'dataset_auxiliary_node_states.include_in_diffusion=true requires a dataset with auxiliary node state metadata. '
+                    'No auxiliary node states were found in dataset_info; use an extended dataset variant such as MMFF or atom_details, '
+                    'or disable dataset_auxiliary_node_states.include_in_diffusion.'
+                )
+        else:
+            self.auxiliary_node_state_values = collections.OrderedDict()
+        self.auxiliary_node_state_names = list(self.auxiliary_node_state_values.keys())
+        self.auxiliary_node_state_dims = {
+            name: len(values) for name, values in self.auxiliary_node_state_values.items()
+        }
+        self.auxiliary_node_state_marginals = infer_auxiliary_node_state_marginals(
+            dataset_info,
+            self.auxiliary_node_state_values,
+        ) if self.include_dataset_auxiliary_node_states else collections.OrderedDict()
 
         # setup generation
         self.generation_config = generation
@@ -166,14 +193,16 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             'y': 0 if discard_conditioning else dataset_info['dim_targets'],
             "edge_dist": 1
         }
+        self.data_dims.update(self.auxiliary_node_state_dims)
 
         self.data_dims['edge_adjmat'] += 1  # account for no-edge class
 
         if received_dims:
             self.received_dims = deepcopy(received_dims)
             self.received_dims['edge_adjmat'] += 1
+            self.received_dims.update(self.auxiliary_node_state_dims)
         else:
-            self.received_dims = self.data_dims
+            self.received_dims = deepcopy(self.data_dims)
 
         # increase dimensions based on additional features (creates a copy)
         self.augmented_dims = increase_dims_list(self.received_dims, self.additional_features)
@@ -219,12 +248,18 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             'edge_adjmat': {'num_cls': self.data_dims['edge_adjmat']},
             'node_charges': {'num_cls': self.data_dims['node_charges']}
         }
+        process_kwargs.update({
+            name: {'num_cls': num_classes}
+            for name, num_classes in self.auxiliary_node_state_dims.items()
+        })
         # directly add marginals if they are available in the dataset_info
         if 'marginals' in dataset_info:
             marginals = dataset_info['marginals']
             process_kwargs['x']['marginals'] = marginals['x']
             process_kwargs['edge_adjmat']['marginals'] = marginals['edge_attr']
             process_kwargs['node_charges']['marginals'] = marginals['node_charges']
+        for name, marginals in self.auxiliary_node_state_marginals.items():
+            process_kwargs[name]['marginals'] = marginals
         
         # build all noise processes
         diffusion_procs_per_data = dict_of_noise_processes_from_config(
@@ -244,7 +279,8 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             )
         else:
             # here first the structure is compute, then the distances conditioned on the structure
-            diffusion_struct = {k: diffusion_procs_per_data[k] for k in ['x', 'edge_adjmat', 'node_charges']}
+            diffusion_struct_keys = ['x', 'edge_adjmat', 'node_charges', *self.auxiliary_node_state_names]
+            diffusion_struct = {k: diffusion_procs_per_data[k] for k in diffusion_struct_keys}
             diffusion_dist = {'edge_dist': diffusion_procs_per_data['edge_dist']}
             
             # the samples are combined by just adding the distances
@@ -285,6 +321,14 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             labels.DENOISE_MAE_DIST: MeanAbsoluteError(),
             labels.DENOISE_TOTAL: MeanMetric()
         })
+        if len(self.auxiliary_node_state_names) > 0:
+            metrics[labels.DENOISE_CE_AUXILIARY_NODE_STATES] = MeanMetric()
+            for name in self.auxiliary_node_state_names:
+                metrics[labels.denoise_ce_auxiliary_node_state(name)] = MeanMetric()
+                metrics[labels.denoise_accuracy_auxiliary_node_state(name)] = MulticlassAccuracy(
+                    num_classes=self.data_dims[name],
+                    validate_args=False,
+                )
 
         self.metrics = nn.ModuleDict({
             KEY_TRAIN: deepcopy(metrics),
@@ -458,6 +502,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         true_e = batch_to_generate_dense.edge_adjmat.argmax(dim=-1)[triang_edge_mask]
         true_c = batch_to_generate_dense.node_charges.argmax(dim=-1)[node_mask]
         true_dist = batch_to_generate_dense.edge_dist[triang_edge_mask]
+        true_auxiliary_node_states = self.extract_auxiliary_node_state_targets(batch_to_generate_dense, node_mask)
             
         ##################  UPDATE MARGINAL PROCESS IF NEEDED  #################
         
@@ -511,11 +556,31 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         pred_e = gen_batch_dense.edge_adjmat[triang_edge_mask]
         pred_c = gen_batch_dense.node_charges[node_mask]
         pred_dist = gen_batch_dense.edge_dist[triang_edge_mask]
+        pred_auxiliary_node_states = {
+            name: getattr(gen_batch_dense, name)[node_mask]
+            for name in self.auxiliary_node_state_names
+            if hasattr(gen_batch_dense, name)
+        }
         
         ###########################  FINAL PACKING  ############################
 
-        true_values = [true_x, true_e, true_dist, true_c]
-        pred_values = [pred_x, pred_e, pred_dist, pred_c, node_mask, triang_edge_mask, gen_batch_dense.edge_dist]
+        true_values = {
+            'x': true_x,
+            'edge_adjmat': true_e,
+            'edge_dist': true_dist,
+            'node_charges': true_c,
+            'auxiliary_node_states': true_auxiliary_node_states,
+        }
+        pred_values = {
+            'x': pred_x,
+            'edge_adjmat': pred_e,
+            'edge_dist': pred_dist,
+            'node_charges': pred_c,
+            'auxiliary_node_states': pred_auxiliary_node_states,
+            'node_mask': node_mask,
+            'triang_edge_mask': triang_edge_mask,
+            'full_edge_dist': gen_batch_dense.edge_dist,
+        }
         
         return true_values, pred_values
     
@@ -536,20 +601,35 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         metrics[labels.DENOISE_CE_C](loss_logs[labels.DENOISE_CE_C])
         metrics[labels.DENOISE_MSE_DIST](loss_logs[labels.DENOISE_MSE_DIST])
         metrics[labels.DENOISE_TOTAL](loss_logs[labels.DENOISE_TOTAL])
-        if pred_values[0].numel() > 0:
-            metrics[labels.DENOISE_ACC_X](pred_values[0], true_values[0])
-        if pred_values[1].numel() > 0:
-            metrics[labels.DENOISE_ACC_E](pred_values[1], true_values[1])
-        if pred_values[2].numel() > 0:
-            metrics[labels.DENOISE_MAE_DIST](pred_values[2], true_values[2])
-        if pred_values[3].numel() > 0:
-            metrics[labels.DENOISE_ACC_C](pred_values[3], true_values[3])
+        if labels.DENOISE_CE_AUXILIARY_NODE_STATES in loss_logs:
+            metrics[labels.DENOISE_CE_AUXILIARY_NODE_STATES](loss_logs[labels.DENOISE_CE_AUXILIARY_NODE_STATES])
+        if pred_values['x'].numel() > 0:
+            metrics[labels.DENOISE_ACC_X](pred_values['x'], true_values['x'])
+        if pred_values['edge_adjmat'].numel() > 0:
+            metrics[labels.DENOISE_ACC_E](pred_values['edge_adjmat'], true_values['edge_adjmat'])
+        if pred_values['edge_dist'].numel() > 0:
+            metrics[labels.DENOISE_MAE_DIST](pred_values['edge_dist'], true_values['edge_dist'])
+        if pred_values['node_charges'].numel() > 0:
+            metrics[labels.DENOISE_ACC_C](pred_values['node_charges'], true_values['node_charges'])
+        for name in self.auxiliary_node_state_names:
+            ce_key = labels.denoise_ce_auxiliary_node_state(name)
+            acc_key = labels.denoise_accuracy_auxiliary_node_state(name)
+            if ce_key in loss_logs:
+                metrics[ce_key](loss_logs[ce_key])
+            pred_aux_state = pred_values['auxiliary_node_states'].get(name)
+            true_aux_state = true_values['auxiliary_node_states'].get(name)
+            if pred_aux_state is not None and true_aux_state is not None and pred_aux_state.numel() > 0:
+                metrics[acc_key](pred_aux_state, true_aux_state)
 
         return metrics
 
 
 
     def prepare_batch(self, batch: SparseGraph):
+
+        if self.include_dataset_auxiliary_node_states:
+            self.materialize_auxiliary_node_states(batch)
+            self.ensure_auxiliary_node_states_are_one_hot(batch)
 
         if self.received_dims['y'] == 0:
             batch.y = None
@@ -807,6 +887,9 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
         final_graph.x = torch.softmax(final_graph.x, dim=-1)
         final_graph.node_charges = torch.softmax(final_graph.node_charges, dim=-1)
         final_graph.edge_adjmat = torch.softmax(final_graph.edge_adjmat, dim=-1)
+        for name in self.auxiliary_node_state_names:
+            if hasattr(final_graph, name):
+                setattr(final_graph, name, torch.softmax(getattr(final_graph, name), dim=-1))
         
         # postprocess distances if needed (single case)
         # in other cases, it is already inside sample_posterior
@@ -974,7 +1057,7 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
                 conditioning_elems=conditioning_elems[batch_idx] if conditioning_elems is not None else None
             )
 
-            graph_batch.collapse('x', 'edge_attr', 'node_charges')
+            graph_batch.collapse('x', 'edge_attr', 'node_charges', *self.auxiliary_node_state_names)
 
             output_batch = graph_batch.to_data_list()
 
@@ -1002,6 +1085,33 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             feature(graph)
 
         return graph
+
+
+    def extract_auxiliary_node_state_targets(self, graph: DenseGraph, node_mask: Tensor) -> collections.OrderedDict[str, Tensor]:
+        return collections.OrderedDict(
+            (name, getattr(graph, name).argmax(dim=-1)[node_mask])
+            for name in self.auxiliary_node_state_names
+            if hasattr(graph, name)
+        )
+
+
+    def materialize_auxiliary_node_states(self, batch: SparseGraph) -> None:
+        missing_attrs = [name for name in self.auxiliary_node_state_names if not hasattr(batch, name)]
+        if len(missing_attrs) > 0:
+            raise ValueError(
+                'Auxiliary node states were requested, but the current batch does not contain the required explicit auxiliary node state attributes: '
+                + ', '.join(missing_attrs)
+                + '. Reprocess the dataset with the extended auxiliary-node-state format.'
+            )
+
+
+    def ensure_auxiliary_node_states_are_one_hot(self, batch: SparseGraph) -> None:
+        for name, num_classes in self.auxiliary_node_state_dims.items():
+            value = getattr(batch, name, None)
+            if value is None:
+                continue
+            if value.ndim == 1:
+                setattr(batch, name, one_hot(value.long(), num_classes=num_classes, dtype=torch.float32))
 
 
     def using_pos_emb(self):
@@ -1096,14 +1206,22 @@ def to_onehot_data(d, **classes_nums):
 
     if isinstance(d, tuple):
         k, d = d
-        ret_d = F.one_hot(
-            d.long(), num_classes = classes_nums[k]
-        ).float()
+        ret_d = one_hot(
+            d.long(), num_classes=classes_nums[k], dtype=torch.float32
+        )
 
     elif isinstance(d, DenseGraph):
-        ret_d = d.to_onehot(
-            {key: classes_nums[key] for key in ['x', 'edge_adjmat', 'node_charges']}
-        )
+        ret_d = d
+        for key, num_classes in classes_nums.items():
+            if num_classes <= 1 or not hasattr(ret_d, key):
+                continue
+            value = getattr(ret_d, key)
+            if value is None:
+                continue
+            if DenseGraph.is_node_attr(key) and value.ndim == 2:
+                setattr(ret_d, key, one_hot(value.long(), num_classes=num_classes, dtype=torch.float32))
+            elif DenseGraph.is_edge_attr(key) and value.ndim == 3:
+                setattr(ret_d, key, one_hot(value.long(), num_classes=num_classes, dtype=torch.float32))
 
     elif isinstance(d, Tensor):
         if d.dtype == torch.bool:

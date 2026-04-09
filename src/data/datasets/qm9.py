@@ -14,7 +14,7 @@ from torch_geometric.datasets.qm9 import conversion
 
 from src.data.datasets.core import RawDataset, DataResources, DatasetException, DEFAULT_DATASET_PATH, DEFAULT_SPLITS
 from src.data.datasets.molecular import MolecularGraphsDataset, SmilesDataset
-from src.data.datasets.atom_types_representation import AtomTypeRepresentation, ATOM_TYPES_REPR_STATS_KEY
+from src.data.datasets.atom_types_representation import AUXILIARY_NODE_STATES_STATS_KEY
 
 from copy import copy
 
@@ -83,7 +83,7 @@ class QM9Raw(RawDataset):
             self.atom_types = self.stats['atom_types']
             self.bond_types = self.stats['bond_types']
             self.charges = self.stats['charges'] if 'charges' in self.stats else None
-            self.atom_types_repr_values = self.stats.get(ATOM_TYPES_REPR_STATS_KEY)
+            self.auxiliary_node_state_values = self.stats.get(AUXILIARY_NODE_STATES_STATS_KEY)
 
 
     
@@ -108,13 +108,13 @@ class QM9Raw(RawDataset):
         stats_new['atom_types'] = self.atom_types # use old atom types
         stats_new['bond_types'] = self.bond_types # use old bond types
         stats_new['charges'] = self.charges # use old charges
-        if self.atom_types_repr_values is not None:
-            stats_new[ATOM_TYPES_REPR_STATS_KEY] = self.atom_types_repr_values
+        if self.auxiliary_node_state_values is not None:
+            stats_new[AUXILIARY_NODE_STATES_STATS_KEY] = self.auxiliary_node_state_values
         subset.stats = stats_new
         subset.atom_types = self.atom_types
         subset.bond_types = self.bond_types
         subset.charges = self.charges
-        subset.atom_types_repr_values = self.atom_types_repr_values
+        subset.auxiliary_node_state_values = self.auxiliary_node_state_values
         
         # store data in files
         subset.save(subset.stats, subset.raw_paths[2])
@@ -180,7 +180,7 @@ class QM9Raw(RawDataset):
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
         self.charges = self.stats['charges']
-        self.atom_types_repr_values = self.stats.get(ATOM_TYPES_REPR_STATS_KEY)
+        self.auxiliary_node_state_values = self.stats.get(AUXILIARY_NODE_STATES_STATS_KEY)
         
         # store data in files
         self.save(self.stats, self.raw_paths[2])

@@ -22,6 +22,8 @@ method:
                 - nodes_num
                 - spectral
                 - eigen_distance
+            dataset_auxiliary_node_states:
+                include_in_diffusion: true
             denoising:
                 distance_output_mode: conditional
                 loss:

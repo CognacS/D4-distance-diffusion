@@ -10,7 +10,7 @@ from torch_geometric.data import download_url
 
 from src.data.datasets.core import RawDataset, DataResources, DatasetException, DEFAULT_DATASET_PATH, DEFAULT_SPLITS
 from src.data.datasets.molecular import MolecularGraphsDataset, SmilesDataset
-from src.data.datasets.atom_types_representation import ATOM_TYPES_REPR_STATS_KEY
+from src.data.datasets.atom_types_representation import AUXILIARY_NODE_STATES_STATS_KEY
 from src.data.utils.storing import load_file
 
 
@@ -57,7 +57,7 @@ class GeomDrugsRaw(RawDataset):
             self.atom_types = self.stats['atom_types']
             self.bond_types = self.stats['bond_types']
             self.charges = self.stats['charges'] if 'charges' in self.stats else None
-            self.atom_types_repr_values = self.stats.get(ATOM_TYPES_REPR_STATS_KEY)
+            self.auxiliary_node_state_values = self.stats.get(AUXILIARY_NODE_STATES_STATS_KEY)
 
 
     
@@ -112,7 +112,7 @@ class GeomDrugsRaw(RawDataset):
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
         self.charges = self.stats['charges']
-        self.atom_types_repr_values = self.stats.get(ATOM_TYPES_REPR_STATS_KEY)
+        self.auxiliary_node_state_values = self.stats.get(AUXILIARY_NODE_STATES_STATS_KEY)
         
         # store data in files
         self.save(self.stats, self.raw_paths[1])

@@ -463,13 +463,17 @@ class GraphTransformerDistance(nn.Module):
         
         self.input_dims = input_dims
         self.output_dims = output_dims
+        self.auxiliary_node_attrs = [
+            key for key in input_dims
+            if DenseGraph.is_node_attr(key) and key not in [DIM_X, DIM_C]
+        ]
 
         self.num_layers = num_layers
         self.use_residuals_inout = use_residuals_inout
         
         self.distance_enc = SinusoidalPosEmb(distance_dim, scale=100.0)
 
-        self.in_dim_x = input_dims[DIM_X] + input_dims[DIM_C]
+        self.in_dim_x = input_dims[DIM_X] + input_dims[DIM_C] + sum(input_dims[key] for key in self.auxiliary_node_attrs)
         self.in_dim_e = input_dims[DIM_E] + distance_dim  # distance is added to edges
         self.in_dim_y = input_dims[DIM_Y]
 
@@ -483,6 +487,7 @@ class GraphTransformerDistance(nn.Module):
         self.out_dim_e = output_dims[DIM_E]
         self.out_dim_y = output_dims[DIM_Y]
         self.out_dim_c = output_dims[DIM_C]
+        self.out_dim_aux = {key: output_dims[key] for key in self.auxiliary_node_attrs}
 
         ###########################  INPUT ENCODERS  ###########################
         # nodes encoder
@@ -540,6 +545,14 @@ class GraphTransformerDistance(nn.Module):
             self.act_fn(),
             nn.Linear(encdec_hidden_dims[DIM_X], self.out_dim_c)
         )
+        self.mlp_out_aux = nn.ModuleDict({
+            key: nn.Sequential(
+                nn.Linear(transf_inout_dims[DIM_X], encdec_hidden_dims[DIM_X]),
+                self.act_fn(),
+                nn.Linear(encdec_hidden_dims[DIM_X], self.out_dim_aux[key])
+            )
+            for key in self.auxiliary_node_attrs
+        })
 
         # edges decoder
         self.mlp_out_E = nn.Sequential(
@@ -569,11 +582,17 @@ class GraphTransformerDistance(nn.Module):
 
         ########################  ASSERTIONS ON INPUT  #########################
         X, E, y, D, C = graph.x, graph.edge_adjmat, graph.y, graph.edge_dist, graph.node_charges
+        auxiliary_node_states = {
+            key: getattr(graph, key)
+            for key in self.auxiliary_node_attrs
+        }
 
         assert X.shape[-1] == self.input_dims[DIM_X]
         assert E.shape[-1] == self.input_dims[DIM_E]
         assert y is None or y.shape[-1] == self.input_dims[DIM_Y]
         assert C.shape[-1] == self.input_dims[DIM_C]
+        for key, value in auxiliary_node_states.items():
+            assert value.shape[-1] == self.input_dims[key]
 
         bs, nq = X.shape[0], X.shape[1]
 
@@ -596,12 +615,17 @@ class GraphTransformerDistance(nn.Module):
             E_to_out = E[..., :self.out_dim_e]
             D_to_out = D  # distance is always 1-dimensional
             C_to_out = C[..., :self.out_dim_c]
+            auxiliary_to_out = {
+                key: auxiliary_node_states[key][..., :self.out_dim_aux[key]]
+                for key in self.auxiliary_node_attrs
+            }
             if self.using_y:
                 y_to_out = y[..., :self.out_dim_y]
 
         ###########################  ENCODE INPUTS  ############################
         # special treatment for edges (to make it symmetric (shouldn't this already be?))
-        X = self.mlp_in_X(torch.cat([X, C], dim=-1)) # concatenate nodes with charges
+        node_inputs = [X, C, *[auxiliary_node_states[key] for key in self.auxiliary_node_attrs]]
+        X = self.mlp_in_X(torch.cat(node_inputs, dim=-1)) # concatenate node state inputs before encoding
         D = self.distance_enc(D)
         E = self.mlp_in_E(torch.cat([E, D], dim=-1))  # concatenate distance to edges
         E = (E + E.transpose(1, 2)) / 2   # new_E should already be symmetric if E is symmetric!!!
@@ -621,8 +645,13 @@ class GraphTransformerDistance(nn.Module):
 
 
         ###########################  DECODE OUTPUT  ############################
-        C = self.mlp_out_C(X)
-        X = self.mlp_out_X(X)
+        hidden_X = X
+        C = self.mlp_out_C(hidden_X)
+        X = self.mlp_out_X(hidden_X)
+        auxiliary_node_states = {
+            key: self.mlp_out_aux[key](hidden_X)
+            for key in self.auxiliary_node_attrs
+        }
         D = self.mlp_out_D(E).squeeze(-1)  # distance is always 1-dimensional
         E = self.mlp_out_E(E)
         if self.using_y:
@@ -634,6 +663,8 @@ class GraphTransformerDistance(nn.Module):
             C = C + C_to_out
             E = E + E_to_out
             D = D + D_to_out
+            for key in self.auxiliary_node_attrs:
+                auxiliary_node_states[key] = auxiliary_node_states[key] + auxiliary_to_out[key]
             
         # remove selfloop and make symmetric
         E = E * triang_mask
@@ -655,7 +686,8 @@ class GraphTransformerDistance(nn.Module):
             node_mask=graph.node_mask,
             edge_mask=graph.edge_mask,
             edge_dist=D,
-            node_charges=C
+            node_charges=C,
+            **auxiliary_node_states
         ).apply_mask()
 
         ###############################  RETURN  ###############################

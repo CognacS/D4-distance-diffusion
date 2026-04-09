@@ -15,7 +15,7 @@ from torch_geometric.io.fs import makedirs
 
 import src.data.utils.csv as csvutils
 import src.data.utils.molecular as molutils
-from src.data.datasets.atom_types_representation import ATOM_TYPES_REPR_STATS_KEY
+from src.data.datasets.atom_types_representation import AUXILIARY_NODE_STATES_STATS_KEY
 from src.data.simple_transforms.molecular import smiles2mol, verify_and_compute_3d_conformer
 
 from copy import copy
@@ -282,7 +282,7 @@ class BaseDigMoleculesRaw(ExtendedMolecularDatasetRaw):
         self.atom_types = self.stats['atom_types']
         self.bond_types = self.stats['bond_types']
         self.charges = self.stats['charges']
-        self.atom_types_repr_values = self.stats.get(ATOM_TYPES_REPR_STATS_KEY)
+        self.auxiliary_node_state_values = self.stats.get(AUXILIARY_NODE_STATES_STATS_KEY)
         
         # store data in files
         self.save(self.stats, self.raw_paths[3])
