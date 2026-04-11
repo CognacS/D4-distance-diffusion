@@ -262,13 +262,27 @@ class DistanceDiscreteDenoisingDiffusionModel(GeneratorWithEvaluation):
             process_kwargs[name]['marginals'] = marginals
         
         # build all noise processes
+        process_config = deepcopy(self.diffusion_config.process.params)
+        missing_auxiliary_process_configs = [
+            name for name in self.auxiliary_node_state_names
+            if name not in process_config
+        ]
+        if len(missing_auxiliary_process_configs) > 0:
+            raise ValueError(
+                'Auxiliary node state diffusion is enabled, but the D4 diffusion config does not declare processes for all auxiliary node states. '
+                'Missing process configs for: ' + ', '.join(missing_auxiliary_process_configs) + '. '
+                'Select an auxiliary-aware diffusion config, or add these process entries explicitly under method.model.params.diffusion.process.params.'
+            )
+
         diffusion_procs_per_data = dict_of_noise_processes_from_config(
-            config = self.diffusion_config.process.params,
+            config = process_config,
             process_kwargs=process_kwargs
         )
         # check that all required processes are present
         assert all(s in diffusion_procs_per_data for s in ['x', 'edge_adjmat', 'edge_dist', 'node_charges']), \
             "Diffusion processes for x, edge_adjmat, edge_dist, node_charges must be specified in D4Model"
+        assert all(name in diffusion_procs_per_data for name in self.auxiliary_node_state_names), \
+            'Diffusion processes for auxiliary node states must be specified or auto-derived in D4Model'
         # build the graph diffusion process
         # this computes all processes at the same time in a single call
         

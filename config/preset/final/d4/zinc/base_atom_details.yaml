@@ -1,6 +1,7 @@
 # @package _global_
 defaults:
  - override /method/model/architecture@method.model.params.denoising.architecture: graph_transformer/gt_large_distance_orig
+ - override /method/model/D4/diffusion@method.model.params.diffusion: marginal_500_atom_details
  - override /task: zinc_3d_atom_details
  - override /task/test: molecular_3d_pre
  - override /logger: wandb
