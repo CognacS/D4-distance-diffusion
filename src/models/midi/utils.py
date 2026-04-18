@@ -1,4 +1,5 @@
 import os
+import collections
 from copy import deepcopy
 from typing import Optional, Union, Dict
 
@@ -62,6 +63,15 @@ def to_dense(data, dataset_info, device=None):
     pos = pos.float()
     assert pos.mean(dim=1).abs().max() < 1e-3
     charges, _ = to_dense_batch(x=data.charges, batch=data.batch)
+    auxiliary_node_states = collections.OrderedDict()
+    for name in getattr(dataset_info, 'auxiliary_node_state_names', []):
+        value = getattr(data, name, None)
+        if value is None:
+            raise ValueError(
+                f"Auxiliary node states were requested, but the current batch does not contain '{name}'. "
+                "Reprocess the dataset with the explicit auxiliary-node-state format."
+            )
+        auxiliary_node_states[name], _ = to_dense_batch(x=value, batch=data.batch)
     max_num_nodes = X.size(1)
     if data.edge_attr.ndim == 2:
         edge_attr = data.edge_attr.argmax(-1)
@@ -71,23 +81,30 @@ def to_dense(data, dataset_info, device=None):
     # add 1 to edge_attr to account for no-bond class
     E = to_dense_adj(edge_index=edge_index, batch=data.batch, edge_attr=edge_attr+1, max_num_nodes=max_num_nodes)
 
-    X, charges, E = dataset_info.to_one_hot(X, charges=charges, E=E, node_mask=node_mask)
-
-    y = X.new_zeros((X.shape[0], 0))
+    data = dataset_info.to_one_hot(
+        X=X,
+        charges=charges,
+        E=E,
+        node_mask=node_mask,
+        auxiliary_node_states=auxiliary_node_states,
+    )
+    data.pos = pos
+    data.y = data.X.new_zeros((data.X.shape[0], 0))
+    data.node_mask = node_mask
 
     if device is not None:
-        X = X.to(device)
-        E = E.to(device)
-        y = y.to(device)
         pos = pos.to(device)
-        node_mask = node_mask.to(device)
+        data = data.device_as(pos)
+        data.pos = pos
+        data.y = data.y.to(device)
+        data.node_mask = node_mask.to(device)
 
-    data = PlaceHolder(X=X, charges=charges, pos=pos, E=E, y=y,  node_mask=node_mask)
     return data.mask()
 
 
 class PlaceHolder:
-    def __init__(self, pos, X, charges, E, y, t_int=None, t=None, node_mask=None):
+    def __init__(self, pos=None, X=None, charges=None, E=None, y=None, t_int=None, t=None, node_mask=None,
+                 auxiliary_node_states=None):
         self.pos = pos
         self.X = X
         self.charges = charges
@@ -96,6 +113,7 @@ class PlaceHolder:
         self.t_int = t_int
         self.t = t
         self.node_mask = node_mask
+        self.auxiliary_node_states = collections.OrderedDict(auxiliary_node_states or {})
 
     def device_as(self, x: torch.Tensor):
         """ Changes the device and dtype of X, E, y. """
@@ -104,6 +122,10 @@ class PlaceHolder:
         self.charges = self.charges.to(x.device) if self.charges is not None else None
         self.E = self.E.to(x.device) if self.E is not None else None
         self.y = self.y.to(x.device) if self.y is not None else None
+        self.auxiliary_node_states = collections.OrderedDict(
+            (name, value.to(x.device) if isinstance(value, torch.Tensor) else value)
+            for name, value in self.auxiliary_node_states.items()
+        )
         return self
 
     def mask(self, node_mask=None):
@@ -121,12 +143,16 @@ class PlaceHolder:
             self.X = self.X * x_mask
         if self.charges is not None:
             self.charges = self.charges * x_mask
+        for name, value in self.auxiliary_node_states.items():
+            if value is not None:
+                self.auxiliary_node_states[name] = value * x_mask
         if self.E is not None:
             self.E = self.E * e_mask1 * e_mask2 * diag_mask
         if self.pos is not None:
             self.pos = self.pos * x_mask
             self.pos = self.pos - self.pos.mean(dim=1, keepdim=True)
-        assert torch.allclose(self.E, torch.transpose(self.E, 1, 2))
+        if self.E is not None:
+            assert torch.allclose(self.E, torch.transpose(self.E, 1, 2))
         return self
 
     def collapse(self):#, collapse_charges):
@@ -135,25 +161,46 @@ class PlaceHolder:
         #copy.charges = collapse_charges.to(self.charges.device)[torch.argmax(self.charges, dim=-1)]
         copy.charges = torch.argmax(self.charges, dim=-1)
         copy.E = torch.argmax(self.E, dim=-1)
+        copy.auxiliary_node_states = collections.OrderedDict(
+            (name, torch.argmax(value, dim=-1))
+            for name, value in self.auxiliary_node_states.items()
+            if value is not None
+        )
         x_mask = self.node_mask.unsqueeze(-1)  # bs, n, 1
         e_mask1 = x_mask.unsqueeze(2)  # bs, n, 1, 1
         e_mask2 = x_mask.unsqueeze(1)  # bs, 1, n, 1
         copy.X[self.node_mask == 0] = - 1
         copy.charges[self.node_mask == 0] = 1000
+        for value in copy.auxiliary_node_states.values():
+            value[self.node_mask == 0] = 1000
         #copy.E[(e_mask1 * e_mask2).squeeze(-1) == 0] = - 1
         return copy
 
     def __repr__(self):
+        aux_repr = ', '.join(
+            f"{name}: {value.shape if type(value) == torch.Tensor else value}"
+            for name, value in self.auxiliary_node_states.items()
+        )
         return (f"pos: {self.pos.shape if type(self.pos) == torch.Tensor else self.pos} -- " +
                 f"X: {self.X.shape if type(self.X) == torch.Tensor else self.X} -- " +
                 f"charges: {self.charges.shape if type(self.charges) == torch.Tensor else self.charges} -- " +
                 f"E: {self.E.shape if type(self.E) == torch.Tensor else self.E} -- " +
-                f"y: {self.y.shape if type(self.y) == torch.Tensor else self.y}")
+                f"y: {self.y.shape if type(self.y) == torch.Tensor else self.y} -- " +
+                f"aux: {{{aux_repr}}}")
 
 
     def copy(self):
-        return PlaceHolder(X=self.X, charges=self.charges, E=self.E, y=self.y, pos=self.pos, t_int=self.t_int, t=self.t,
-                           node_mask=self.node_mask)
+        return PlaceHolder(
+            X=self.X,
+            charges=self.charges,
+            E=self.E,
+            y=self.y,
+            pos=self.pos,
+            t_int=self.t_int,
+            t=self.t,
+            node_mask=self.node_mask,
+            auxiliary_node_states=collections.OrderedDict(self.auxiliary_node_states.items()),
+        )
 
 
 def setup_wandb(cfg):

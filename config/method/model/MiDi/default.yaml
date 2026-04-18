@@ -50,6 +50,7 @@ cfg:
     hidden_dims : {'dx': 256, 'de': 64, 'dy': 128, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 64, 'dim_ffy': 256}
 
     lambda_train: [3, 0.4, 1, 2, 0]
+    lambda_train_auxiliary_node_states: 1.0
 
     nu:
       p: 2.5
@@ -57,6 +58,7 @@ cfg:
       c: 1
       e: 1.5
       y: 1
+      auxiliary_node_states: 1
 
   train:
     # Training settings
@@ -82,3 +84,6 @@ cfg:
 validation:
     do_assignment: true
     how_many_to_generate: 256
+
+dataset_auxiliary_node_states:
+  include_in_diffusion: false

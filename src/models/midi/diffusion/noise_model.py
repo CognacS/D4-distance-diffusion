@@ -2,19 +2,28 @@ import matplotlib.hatch
 import torch
 import torch.nn.functional as F
 import numpy as np
+import collections
 
 import src.models.midi.utils as utils
 from src.models.midi.diffusion import diffusion_utils
 
 
 class NoiseModel:
-    def __init__(self, cfg):
-        self.mapping = ['p', 'x', 'c', 'e', 'y']
+    def __init__(self, cfg, auxiliary_node_state_names=None):
+        self.auxiliary_node_state_names = list(auxiliary_node_state_names or [])
+        self.mapping = ['p', 'x', 'c', 'e', 'y', *self.auxiliary_node_state_names]
         self.inverse_mapping = {m: i for i, m in enumerate(self.mapping)}
         nu = cfg.model.nu
+        self.nu_lookup = {m: m for m in ['p', 'x', 'c', 'e', 'y']}
+        for name in self.auxiliary_node_state_names:
+            self.nu_lookup[name] = 'auxiliary_node_states'
         self.nu_arr = []
         for m in self.mapping:
-            self.nu_arr.append(nu[m])
+            if self.nu_lookup[m] not in nu:
+                raise ValueError(
+                    f"MiDi auxiliary-node-state diffusion requires cfg.model.nu.{self.nu_lookup[m]} to be defined."
+                )
+            self.nu_arr.append(nu[self.nu_lookup[m]])
 
         # Define the transition matrices for the discrete features
         self.Px = None
@@ -29,6 +38,9 @@ class NoiseModel:
         self.charges_marginals = None
         self.E_marginals = None
         self.y_marginals = None
+        self.auxiliary_node_state_classes = collections.OrderedDict()
+        self.auxiliary_node_state_marginals = collections.OrderedDict()
+        self.Pauxiliary_node_states = collections.OrderedDict()
 
         self.noise_schedule = cfg.model.diffusion_noise_schedule
         self.timesteps = cfg.model.diffusion_steps
@@ -53,10 +65,17 @@ class NoiseModel:
 
     def move_P_device(self, tensor):
         """ Move the transition matrices to the device specified by tensor."""
-        return diffusion_utils.PlaceHolder(X=self.Px.float().to(tensor.device),
-                                           charges=self.Pcharges.float().to(tensor.device),
-                                           E=self.Pe.float().to(tensor.device).float(),
-                                           y=self.Py.float().to(tensor.device), pos=None)
+        return diffusion_utils.PlaceHolder(
+            X=self.Px.float().to(tensor.device),
+            charges=self.Pcharges.float().to(tensor.device),
+            E=self.Pe.float().to(tensor.device).float(),
+            y=self.Py.float().to(tensor.device),
+            pos=None,
+            auxiliary_node_states=collections.OrderedDict(
+                (name, transition.float().to(tensor.device))
+                for name, transition in self.Pauxiliary_node_states.items()
+            ),
+        )
 
     def get_Qt(self, t_int):
         """ Returns one-step transition matrices for X and E, from step t - 1 to step t.
@@ -80,7 +99,22 @@ class NoiseModel:
         by = self.get_beta(t_int=t_int, key='y').unsqueeze(1)
         q_y = by * P.y + (1 - by) * torch.eye(self.y_classes, **kwargs).unsqueeze(0)
 
-        return utils.PlaceHolder(X=q_x, charges=q_c, E=q_e, y=q_y, pos=None)
+        q_auxiliary_node_states = collections.OrderedDict()
+        for name, num_classes in self.auxiliary_node_state_classes.items():
+            b_aux = self.get_beta(t_int=t_int, key=name).unsqueeze(1)
+            q_auxiliary_node_states[name] = (
+                b_aux * P.auxiliary_node_states[name]
+                + (1 - b_aux) * torch.eye(num_classes, **kwargs).unsqueeze(0)
+            )
+
+        return utils.PlaceHolder(
+            X=q_x,
+            charges=q_c,
+            E=q_e,
+            y=q_y,
+            pos=None,
+            auxiliary_node_states=q_auxiliary_node_states,
+        )
 
     def get_Qt_bar(self, t_int):
         """ Returns t-step transition matrices for X and E, from step 0 to step t.
@@ -101,11 +135,25 @@ class NoiseModel:
         q_c = a_c * torch.eye(self.charges_classes, device=dev).unsqueeze(0) + (1 - a_c) * P.charges
         q_e = a_e * torch.eye(self.E_classes, device=dev).unsqueeze(0) + (1 - a_e) * P.E
         q_y = a_y * torch.eye(self.y_classes, device=dev).unsqueeze(0) + (1 - a_y) * P.y
+        q_auxiliary_node_states = collections.OrderedDict()
+        for name, num_classes in self.auxiliary_node_state_classes.items():
+            a_aux = self.get_alpha_bar(t_int=t_int, key=name).unsqueeze(1)
+            q_auxiliary_node_states[name] = (
+                a_aux * torch.eye(num_classes, device=dev).unsqueeze(0)
+                + (1 - a_aux) * P.auxiliary_node_states[name]
+            )
 
         assert ((q_x.sum(dim=2) - 1.).abs() < 1e-4).all(), q_x.sum(dim=2) - 1
         assert ((q_e.sum(dim=2) - 1.).abs() < 1e-4).all()
 
-        return utils.PlaceHolder(X=q_x, charges=q_c, E=q_e, y=q_y, pos=None)
+        return utils.PlaceHolder(
+            X=q_x,
+            charges=q_c,
+            E=q_e,
+            y=q_y,
+            pos=None,
+            auxiliary_node_states=q_auxiliary_node_states,
+        )
 
     def get_beta(self, t_normalized=None, t_int=None, key=None):
         assert int(t_normalized is None) + int(t_int is None) == 1
@@ -208,13 +256,29 @@ class NoiseModel:
         probX = dense_data.X @ Qtb.X  # (bs, n, dx_out)
         prob_charges = dense_data.charges @ Qtb.charges
         probE = dense_data.E @ Qtb.E.unsqueeze(1)  # (bs, n, n, de_out)
+        prob_auxiliary_node_states = collections.OrderedDict(
+            (name, dense_data.auxiliary_node_states[name] @ Qtb.auxiliary_node_states[name])
+            for name in self.auxiliary_node_state_names
+        )
 
-        sampled_t = diffusion_utils.sample_discrete_features(probX=probX, probE=probE, prob_charges=prob_charges,
-                                                             node_mask=dense_data.node_mask)
+        sampled_t = diffusion_utils.sample_discrete_features(
+            probX=probX,
+            probE=probE,
+            prob_charges=prob_charges,
+            node_mask=dense_data.node_mask,
+            auxiliary_node_state_probs=prob_auxiliary_node_states,
+        )
 
         X_t = F.one_hot(sampled_t.X, num_classes=self.X_classes)
         E_t = F.one_hot(sampled_t.E, num_classes=self.E_classes)
         charges_t = F.one_hot(sampled_t.charges, num_classes=self.charges_classes)
+        auxiliary_node_states_t = collections.OrderedDict(
+            (
+                name,
+                F.one_hot(sampled_t.auxiliary_node_states[name], num_classes=self.auxiliary_node_state_classes[name]),
+            )
+            for name in self.auxiliary_node_state_names
+        )
         assert (dense_data.X.shape == X_t.shape) and (dense_data.E.shape == E_t.shape)
 
         noise_pos = torch.randn(dense_data.pos.shape, device=dense_data.pos.device)
@@ -226,8 +290,17 @@ class NoiseModel:
         s = self.get_sigma_bar(t_int=t_int, key='p').unsqueeze(-1)
         pos_t = a * dense_data.pos + s * noise_pos_masked
 
-        z_t = utils.PlaceHolder(X=X_t, charges=charges_t, E=E_t, y=dense_data.y, pos=pos_t, t_int=t_int,
-                                t=t_float, node_mask=dense_data.node_mask).mask()
+        z_t = utils.PlaceHolder(
+            X=X_t,
+            charges=charges_t,
+            E=E_t,
+            y=dense_data.y,
+            pos=pos_t,
+            t_int=t_int,
+            t=t_float,
+            node_mask=dense_data.node_mask,
+            auxiliary_node_states=auxiliary_node_states_t,
+        ).mask()
         return z_t
 
     def get_limit_dist(self):
@@ -237,8 +310,21 @@ class NoiseModel:
         E_marginals = E_marginals / torch.sum(E_marginals)
         charges_marginals = self.charges_marginals + 1e-7
         charges_marginals = charges_marginals / torch.sum(charges_marginals)
-        limit_dist = utils.PlaceHolder(X=X_marginals, E=E_marginals, charges=charges_marginals,
-                                       y=None, pos=None)
+        auxiliary_node_state_marginals = collections.OrderedDict(
+            (
+                name,
+                (marginals + 1e-7) / torch.sum(marginals + 1e-7),
+            )
+            for name, marginals in self.auxiliary_node_state_marginals.items()
+        )
+        limit_dist = utils.PlaceHolder(
+            X=X_marginals,
+            E=E_marginals,
+            charges=charges_marginals,
+            y=None,
+            pos=None,
+            auxiliary_node_states=auxiliary_node_state_marginals,
+        )
         return limit_dist
 
     def sample_limit_dist(self, node_mask):
@@ -253,6 +339,11 @@ class NoiseModel:
         U_c = charges_limit.flatten(end_dim=-2).multinomial(1).reshape(bs, n_max).to(node_mask.device)
         U_E = e_limit.flatten(end_dim=-2).multinomial(1).reshape(bs, n_max, n_max).to(node_mask.device)
         U_y = torch.zeros((bs, 0), device=node_mask.device)
+        U_auxiliary_node_states = collections.OrderedDict()
+        for name, marginals in self.auxiliary_node_state_marginals.items():
+            aux_limit = marginals.expand(bs, n_max, -1)
+            U_aux = aux_limit.flatten(end_dim=-2).multinomial(1).reshape(bs, n_max).to(node_mask.device)
+            U_auxiliary_node_states[name] = F.one_hot(U_aux, num_classes=aux_limit.shape[-1]).float()
 
         U_X = F.one_hot(U_X, num_classes=x_limit.shape[-1]).float()
         U_E = F.one_hot(U_E, num_classes=e_limit.shape[-1]).float()
@@ -273,8 +364,17 @@ class NoiseModel:
 
         t_array = pos.new_ones((pos.shape[0], 1))
         t_int_array = self.T * t_array.long()
-        return utils.PlaceHolder(X=U_X, charges=U_c, E=U_E, y=U_y, pos=pos, t_int=t_int_array, t=t_array,
-                                 node_mask=node_mask).mask(node_mask)
+        return utils.PlaceHolder(
+            X=U_X,
+            charges=U_c,
+            E=U_E,
+            y=U_y,
+            pos=pos,
+            t_int=t_int_array,
+            t=t_array,
+            node_mask=node_mask,
+            auxiliary_node_states=U_auxiliary_node_states,
+        ).mask(node_mask)
 
     def sample_zs_from_zt_and_pred(self, z_t, pred, s_int):
         """Samples from zs ~ p(zs | zt). Only used during sampling. """
@@ -309,6 +409,10 @@ class NoiseModel:
         pred_X = F.softmax(pred.X, dim=-1)               # bs, n, d0
         pred_E = F.softmax(pred.E, dim=-1)               # bs, n, n, d0
         pred_charges = F.softmax(pred.charges, dim=-1)
+        pred_auxiliary_node_states = collections.OrderedDict(
+            (name, F.softmax(pred.auxiliary_node_states[name], dim=-1))
+            for name in self.auxiliary_node_state_names
+        )
 
         p_s_and_t_given_0_X = diffusion_utils.compute_batched_over0_posterior_distribution(X_t=z_t.X,
                                                                                            Qt=Qt.X,
@@ -323,6 +427,18 @@ class NoiseModel:
                                                                                            Qt=Qt.charges,
                                                                                            Qsb=Qsb.charges,
                                                                                            Qtb=Qtb.charges)
+        p_s_and_t_given_0_auxiliary_node_states = collections.OrderedDict(
+            (
+                name,
+                diffusion_utils.compute_batched_over0_posterior_distribution(
+                    X_t=z_t.auxiliary_node_states[name],
+                    Qt=Qt.auxiliary_node_states[name],
+                    Qsb=Qsb.auxiliary_node_states[name],
+                    Qtb=Qtb.auxiliary_node_states[name],
+                ),
+            )
+            for name in self.auxiliary_node_state_names
+        )
 
         # Dim of these two tensors: bs, N, d0, d_t-1
         weighted_X = pred_X.unsqueeze(-1) * p_s_and_t_given_0_X         # bs, n, d0, d_t-1
@@ -335,6 +451,15 @@ class NoiseModel:
         unnormalized_prob_c[torch.sum(unnormalized_prob_c, dim=-1) == 0] = 1e-5
         prob_c = unnormalized_prob_c / torch.sum(unnormalized_prob_c, dim=-1, keepdim=True)  # bs, n, d_t-1
 
+        prob_auxiliary_node_states = collections.OrderedDict()
+        for name in self.auxiliary_node_state_names:
+            weighted_aux = pred_auxiliary_node_states[name].unsqueeze(-1) * p_s_and_t_given_0_auxiliary_node_states[name]
+            unnormalized_prob_aux = weighted_aux.sum(dim=2)
+            unnormalized_prob_aux[torch.sum(unnormalized_prob_aux, dim=-1) == 0] = 1e-5
+            prob_auxiliary_node_states[name] = unnormalized_prob_aux / torch.sum(
+                unnormalized_prob_aux, dim=-1, keepdim=True
+            )
+
         pred_E = pred_E.reshape((bs, -1, pred_E.shape[-1]))
         weighted_E = pred_E.unsqueeze(-1) * p_s_and_t_given_0_E        # bs, N, d0, d_t-1
         unnormalized_prob_E = weighted_E.sum(dim=-2)
@@ -345,25 +470,51 @@ class NoiseModel:
         assert ((prob_X.sum(dim=-1) - 1).abs() < 1e-4).all()
         assert ((prob_c.sum(dim=-1) - 1).abs() < 1e-4).all()
         assert ((prob_E.sum(dim=-1) - 1).abs() < 1e-4).all()
+        for prob_aux in prob_auxiliary_node_states.values():
+            assert ((prob_aux.sum(dim=-1) - 1).abs() < 1e-4).all()
 
-        sampled_s = diffusion_utils.sample_discrete_features(prob_X, prob_E, prob_c, node_mask=z_t.node_mask)
+        sampled_s = diffusion_utils.sample_discrete_features(
+            prob_X,
+            prob_E,
+            prob_c,
+            node_mask=z_t.node_mask,
+            auxiliary_node_state_probs=prob_auxiliary_node_states,
+        )
 
         X_s = F.one_hot(sampled_s.X, num_classes=self.X_classes).float()
         charges_s = F.one_hot(sampled_s.charges, num_classes=self.charges_classes).float()
         E_s = F.one_hot(sampled_s.E, num_classes=self.E_classes).float()
+        auxiliary_node_states_s = collections.OrderedDict(
+            (
+                name,
+                F.one_hot(sampled_s.auxiliary_node_states[name], num_classes=self.auxiliary_node_state_classes[name]).float(),
+            )
+            for name in self.auxiliary_node_state_names
+        )
 
         assert (E_s == torch.transpose(E_s, 1, 2)).all()
         assert (z_t.X.shape == X_s.shape) and (z_t.E.shape == E_s.shape)
 
-        z_s = utils.PlaceHolder(X=X_s, charges=charges_s,
-                                E=E_s, y=torch.zeros(z_t.y.shape[0], 0, device=X_s.device), pos=pos,
-                                t_int=s_int, t=s_int / self.T, node_mask=node_mask).mask(node_mask)
+        z_s = utils.PlaceHolder(
+            X=X_s,
+            charges=charges_s,
+            E=E_s,
+            y=torch.zeros(z_t.y.shape[0], 0, device=X_s.device),
+            pos=pos,
+            t_int=s_int,
+            t=s_int / self.T,
+            node_mask=node_mask,
+            auxiliary_node_states=auxiliary_node_states_s,
+        ).mask(node_mask)
         return z_s
 
 
 class DiscreteUniformTransition(NoiseModel):
     def __init__(self, cfg, output_dims):
-        super().__init__(cfg=cfg)
+        super().__init__(
+            cfg=cfg,
+            auxiliary_node_state_names=list(getattr(output_dims, 'auxiliary_node_states', {}).keys()),
+        )
         self.X_classes = output_dims.X
         self.charges_classes = output_dims.charges
         self.E_classes = output_dims.E
@@ -375,12 +526,19 @@ class DiscreteUniformTransition(NoiseModel):
         self.Px = torch.ones(1, self.X_classes, self.X_classes) / self.X_classes
         self.Pcharges = torch.ones(1, self.charges_classes, self.charges_classes) / self.charges_classes
         self.Pe = torch.ones(1, self.E_classes, self.E_classes) / self.E_classes
-        self.Pe = torch.ones(1, self.y_classes, self.y_classes) / self.y_classes
+        self.Py = torch.ones(1, self.y_classes, self.y_classes) / self.y_classes
+        for name, num_classes in getattr(output_dims, 'auxiliary_node_states', {}).items():
+            self.auxiliary_node_state_classes[name] = num_classes
+            self.auxiliary_node_state_marginals[name] = torch.ones(num_classes) / num_classes
+            self.Pauxiliary_node_states[name] = torch.ones(1, num_classes, num_classes) / num_classes
 
 
 class MarginalUniformTransition(NoiseModel):
-    def __init__(self, cfg, x_marginals, e_marginals, charges_marginals, y_classes):
-        super().__init__(cfg=cfg)
+    def __init__(self, cfg, x_marginals, e_marginals, charges_marginals, y_classes, auxiliary_node_state_marginals=None):
+        super().__init__(
+            cfg=cfg,
+            auxiliary_node_state_names=list((auxiliary_node_state_marginals or {}).keys()),
+        )
         self.X_classes = len(x_marginals)
         self.E_classes = len(e_marginals)
         self.charges_classes = len(charges_marginals)
@@ -394,3 +552,7 @@ class MarginalUniformTransition(NoiseModel):
         self.Pe = e_marginals.unsqueeze(0).expand(self.E_classes, -1).unsqueeze(0)
         self.Pcharges = charges_marginals.unsqueeze(0).expand(self.charges_classes, -1).unsqueeze(0)
         self.Py = torch.ones(1, self.y_classes, self.y_classes) / self.y_classes
+        for name, marginals in (auxiliary_node_state_marginals or {}).items():
+            self.auxiliary_node_state_classes[name] = len(marginals)
+            self.auxiliary_node_state_marginals[name] = marginals
+            self.Pauxiliary_node_states[name] = marginals.unsqueeze(0).expand(len(marginals), -1).unsqueeze(0)

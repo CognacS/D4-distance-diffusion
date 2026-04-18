@@ -2,6 +2,7 @@ import torch
 from torch.nn import functional as F
 import numpy as np
 import math
+import collections
 import matplotlib.pyplot as plt
 from src.models.midi.utils import PlaceHolder, remove_mean_with_mask
 
@@ -187,13 +188,14 @@ def check_issues_norm_values(gamma, norm_val1, norm_val2, num_stdevs=8):
             f'1 / norm_value = {1. / max_norm_value}')
 
 
-def sample_discrete_features(probX, probE, prob_charges, node_mask):
+def sample_discrete_features(probX, probE, prob_charges, node_mask, auxiliary_node_state_probs=None):
     ''' Sample features from multinomial distribution with given probabilities (probX, probE, proby)
         :param probX: bs, n, dx_out        node features
         :param probE: bs, n, n, de_out     edge features
         :param proby: bs, dy_out           global features.
     '''
     bs, n = node_mask.shape
+    auxiliary_node_state_probs = auxiliary_node_state_probs or {}
     # Noise X
     # The masked rows should define probability distributions as well
     probX[~node_mask] = 1 / probX.shape[-1]
@@ -210,6 +212,12 @@ def sample_discrete_features(probX, probE, prob_charges, node_mask):
     charges_t = prob_charges.multinomial(1)
     charges_t = charges_t.reshape(bs, n)
 
+    sampled_auxiliary_node_states = collections.OrderedDict()
+    for name, prob_aux in auxiliary_node_state_probs.items():
+        prob_aux[~node_mask] = 1 / prob_aux.shape[-1]
+        prob_aux = prob_aux.reshape(bs * n, -1)
+        sampled_auxiliary_node_states[name] = prob_aux.multinomial(1).reshape(bs, n)
+
     # Noise E
     # The masked rows should define probability distributions as well
     inverse_edge_mask = ~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2))
@@ -225,7 +233,14 @@ def sample_discrete_features(probX, probE, prob_charges, node_mask):
     E_t = torch.triu(E_t, diagonal=1)
     E_t = (E_t + torch.transpose(E_t, 1, 2))
 
-    return PlaceHolder(X=X_t, charges=charges_t, E=E_t, y=torch.zeros(bs, 0, device=X_t.device), pos=None)
+    return PlaceHolder(
+        X=X_t,
+        charges=charges_t,
+        E=E_t,
+        y=torch.zeros(bs, 0, device=X_t.device),
+        pos=None,
+        auxiliary_node_states=sampled_auxiliary_node_states,
+    )
 
 
 def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M):
@@ -293,6 +308,11 @@ def mask_distributions(probs, node_mask):
     row_charges = torch.zeros(probs.charges.size(-1), dtype=torch.float, device=device)
     row_charges[0] = 1.
 
+    auxiliary_rows = {
+        name: F.one_hot(torch.zeros((), dtype=torch.long, device=device), num_classes=prob.size(-1)).float()
+        for name, prob in probs.auxiliary_node_states.items()
+    }
+
     row_E = torch.zeros(probs.E.size(-1), dtype=torch.float, device=device)
     row_E[0] = 1.
 
@@ -300,6 +320,8 @@ def mask_distributions(probs, node_mask):
     probs.X[~node_mask] = row_X.view(1,1,-1).expand_as(probs.X)[~node_mask]
     #probs.charges[~node_mask] = row_charges
     probs.charges[~node_mask] = row_charges.view(1,1,-1).expand_as(probs.charges)[~node_mask]
+    for name, prob in probs.auxiliary_node_states.items():
+        prob[~node_mask] = auxiliary_rows[name].view(1, 1, -1).expand_as(prob)[~node_mask]
 
     diag_mask = ~torch.eye(node_mask.size(1), device=node_mask.device, dtype=torch.bool).unsqueeze(0)
     edge_mask = node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask
@@ -311,6 +333,10 @@ def mask_distributions(probs, node_mask):
 
     probs.charges = probs.charges + 1e-7
     probs.charges = probs.charges / torch.sum(probs.charges, dim=-1, keepdim=True)
+
+    for name, prob in probs.auxiliary_node_states.items():
+        prob = prob + 1e-7
+        probs.auxiliary_node_states[name] = prob / torch.sum(prob, dim=-1, keepdim=True)
 
     probs.E = probs.E + 1e-7
     probs.E = probs.E / torch.sum(probs.E, dim=-1, keepdim=True)
@@ -325,5 +351,26 @@ def posterior_distributions(clean_data, noisy_data, Qt, Qsb, Qtb):
     prob_E = compute_posterior_distribution(M=clean_data.E, M_t=noisy_data.E,
                                             Qt_M=Qt.E, Qsb_M=Qsb.E, Qtb_M=Qtb.E)   # (bs, n * n, de)
 
-    return PlaceHolder(X=prob_X, E=prob_E, charges=prob_c, y=None, pos=None)
+    prob_auxiliary_node_states = collections.OrderedDict(
+        (
+            name,
+            compute_posterior_distribution(
+                M=clean_data.auxiliary_node_states[name],
+                M_t=noisy_data.auxiliary_node_states[name],
+                Qt_M=Qt.auxiliary_node_states[name],
+                Qsb_M=Qsb.auxiliary_node_states[name],
+                Qtb_M=Qtb.auxiliary_node_states[name],
+            ),
+        )
+        for name in clean_data.auxiliary_node_states.keys()
+    )
+
+    return PlaceHolder(
+        X=prob_X,
+        E=prob_E,
+        charges=prob_c,
+        y=None,
+        pos=None,
+        auxiliary_node_states=prob_auxiliary_node_states,
+    )
 

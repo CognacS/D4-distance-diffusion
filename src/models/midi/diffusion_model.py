@@ -1,4 +1,5 @@
 from typing import List
+import collections
 import time
 import os
 import math
@@ -35,13 +36,14 @@ from src.models.generator import GeneratorWithEvaluation
 from src.datatypes.features import get_features_list
 from src.datatypes.features.core import increase_dims_list, increase_dims, Feature, get_dims_list
 from src.models import reg_models
+from src.data.datasets.atom_types_representation import infer_auxiliary_node_state_values, infer_auxiliary_node_state_marginals
 
 
 class CompatibilityDatasetInfos:
     # this class transforms this framework dataset_info dict into a
     # MiDi compatible dataset_infos object
     
-    def __init__(self, dataset_info):
+    def __init__(self, dataset_info, include_auxiliary_node_states=False):
 
         # Train + val + test for n_nodes
         n_nodes = dataset_info['num_nodes_hist']
@@ -63,21 +65,79 @@ class CompatibilityDatasetInfos:
         self.num_atom_types = self.atom_types.size(0)
         self.num_edge_types = self.edge_types.size(0)
         self.num_charges = self.charges_marginals.size(0)
-        
-        self.input_dims = utils.PlaceHolder(X=self.num_atom_types, charges=self.num_charges, E=self.num_edge_types, y=1, pos=3)
-        self.output_dims = utils.PlaceHolder(X=self.num_atom_types, charges=self.num_charges, E=self.num_edge_types, y=0, pos=3)
+        if include_auxiliary_node_states:
+            self.auxiliary_node_state_values = infer_auxiliary_node_state_values(dataset_info)
+            if len(self.auxiliary_node_state_values) == 0:
+                raise ValueError(
+                    'dataset_auxiliary_node_states.include_in_diffusion=true requires a dataset with auxiliary node state metadata. '
+                    'No auxiliary node states were found in dataset_info; use an extended dataset variant such as MMFF or atom_details, '
+                    'or disable dataset_auxiliary_node_states.include_in_diffusion.'
+                )
+            self.auxiliary_node_state_marginals = collections.OrderedDict(
+                (name, torch.tensor(values))
+                for name, values in infer_auxiliary_node_state_marginals(
+                    dataset_info,
+                    self.auxiliary_node_state_values,
+                ).items()
+            )
+            missing_marginals = [
+                name for name in self.auxiliary_node_state_values
+                if name not in self.auxiliary_node_state_marginals
+            ]
+            if len(missing_marginals) > 0:
+                raise ValueError(
+                    'Auxiliary node state diffusion requires dataset marginals for all auxiliary node states. '
+                    'Missing marginals for: ' + ', '.join(missing_marginals) + '.'
+                )
+        else:
+            self.auxiliary_node_state_values = collections.OrderedDict()
+            self.auxiliary_node_state_marginals = collections.OrderedDict()
+        self.auxiliary_node_state_names = list(self.auxiliary_node_state_values.keys())
+        self.auxiliary_node_state_dims = collections.OrderedDict(
+            (name, len(values))
+            for name, values in self.auxiliary_node_state_values.items()
+        )
+
+        self.input_dims = utils.PlaceHolder(
+            X=self.num_atom_types,
+            charges=self.num_charges,
+            E=self.num_edge_types,
+            y=1,
+            pos=3,
+            auxiliary_node_states=self.auxiliary_node_state_dims,
+        )
+        self.output_dims = utils.PlaceHolder(
+            X=self.num_atom_types,
+            charges=self.num_charges,
+            E=self.num_edge_types,
+            y=0,
+            pos=3,
+            auxiliary_node_states=self.auxiliary_node_state_dims,
+        )
     
     
-    def to_one_hot(self, X, charges, E, node_mask):
+    def to_one_hot(self, X, charges, E, node_mask, auxiliary_node_states=None):
         if X.ndim == 2:
             X = F.one_hot(X, num_classes=self.num_atom_types).float()
         if E.ndim == 3:
             E = F.one_hot(E, num_classes=self.num_edge_types).float()
         if charges.ndim == 2:
             charges = F.one_hot(charges.long(), num_classes=self.num_charges).float()
-        placeholder = utils.PlaceHolder(X=X, charges=charges, E=E,  y=None, pos=None)
+        encoded_auxiliary_node_states = collections.OrderedDict()
+        for name, value in (auxiliary_node_states or {}).items():
+            if value.ndim == 2:
+                value = F.one_hot(value.long(), num_classes=self.auxiliary_node_state_dims[name]).float()
+            encoded_auxiliary_node_states[name] = value
+        placeholder = utils.PlaceHolder(
+            X=X,
+            charges=charges,
+            E=E,
+            y=None,
+            pos=None,
+            auxiliary_node_states=encoded_auxiliary_node_states,
+        )
         pl = placeholder.mask(node_mask)
-        return pl.X, pl.charges, pl.E
+        return pl
 
     def one_hot_charges(self, charges):
         if charges.ndim == 2:
@@ -102,6 +162,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
             validation: Dict = None,
             # features configurations
             features: Dict = None,
+            dataset_auxiliary_node_states: Dict = None,
             
             ######## passed by configurator ######
             dataset_info: Dict = None,
@@ -129,7 +190,12 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         # self.additional_features: List[Feature] = get_features_list(features) if features else []
         # augmented_dims = increase_dims_list(data_dims, self.additional_features)
         
-        dataset_infos = CompatibilityDatasetInfos(dataset_info)
+        self.dataset_auxiliary_node_states_config = dataset_auxiliary_node_states or {}
+        self.include_dataset_auxiliary_node_states = self.dataset_auxiliary_node_states_config.get('include_in_diffusion', False)
+        dataset_infos = CompatibilityDatasetInfos(
+            dataset_info,
+            include_auxiliary_node_states=self.include_dataset_auxiliary_node_states,
+        )
         
         ####################  END OF COMPATIBILITY SECTION  ####################
         
@@ -141,25 +207,38 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
 
         self.node_dist = nodes_dist
         self.dataset_infos = dataset_infos
+        self.auxiliary_node_state_names = dataset_infos.auxiliary_node_state_names
+        self.auxiliary_node_state_dims = dataset_infos.auxiliary_node_state_dims
         self.extra_features = ExtraFeatures(cfg.model.extra_features, dataset_info=dataset_infos)
         self.input_dims = self.extra_features.update_input_dims(dataset_infos.input_dims)
         self.output_dims = dataset_infos.output_dims
         # self.domain_features = ExtraMolecularFeatures(dataset_infos=dataset_infos)
 
         # Train metrics
-        self.train_loss = TrainLoss(lambda_train=self.cfg.model.lambda_train
-                                     if hasattr(self.cfg.model, "lambda_train") else self.cfg.train.lambda0)
+        self.train_loss = TrainLoss(
+            lambda_train=self.cfg.model.lambda_train if hasattr(self.cfg.model, "lambda_train") else self.cfg.train.lambda0,
+            auxiliary_node_state_names=self.auxiliary_node_state_names,
+            lambda_train_auxiliary_node_states=getattr(self.cfg.model, 'lambda_train_auxiliary_node_states', 1.0),
+        )
         self.train_metrics = TrainMolecularMetrics(dataset_infos)
 
         # Val Metrics
         self.val_metrics = torchmetrics.MetricCollection([custom_metrics.PosMSE(), custom_metrics.XKl(),
                                                           custom_metrics.ChargesKl(), custom_metrics.EKl()])
+        self.val_auxiliary_node_state_metrics = torch.nn.ModuleDict({
+            name: SumExceptBatchKL()
+            for name in self.auxiliary_node_state_names
+        })
         self.val_nll = NLL()
         #self.val_sampling_metrics = SamplingMetrics(train_smiles, dataset_infos, test=False)
 
         # Test metrics
         self.test_metrics = torchmetrics.MetricCollection([custom_metrics.PosMSE(), custom_metrics.XKl(),
                                                            custom_metrics.ChargesKl(), custom_metrics.EKl()])
+        self.test_auxiliary_node_state_metrics = torch.nn.ModuleDict({
+            name: SumExceptBatchKL()
+            for name in self.auxiliary_node_state_names
+        })
         self.test_nll = NLL()
         #self.test_sampling_metrics = SamplingMetrics(train_smiles, dataset_infos, test=True)
 
@@ -184,6 +263,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
                                                          e_marginals=self.dataset_infos.edge_types,
                                                          charges_marginals=self.dataset_infos.charges_marginals,
                                                          y_classes=self.output_dims.y,
+                                                         auxiliary_node_state_marginals=self.dataset_infos.auxiliary_node_state_marginals,
                                                          cfg=cfg)
         else:
             assert ValueError(f"Transition type '{cfg.model.transition}' not implemented.")
@@ -199,6 +279,14 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         del data.node_pos
         data.charges = data.node_charges
         del data.node_charges
+        if self.include_dataset_auxiliary_node_states:
+            missing_attrs = [name for name in self.auxiliary_node_state_names if not hasattr(data, name)]
+            if len(missing_attrs) > 0:
+                raise ValueError(
+                    'Auxiliary node states were requested, but the current batch does not contain the required explicit auxiliary node state attributes: '
+                    + ', '.join(missing_attrs)
+                    + '. Reprocess the dataset with the extended auxiliary-node-state format.'
+                )
         return data
         
 
@@ -229,6 +317,8 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
     def on_validation_epoch_start(self) -> None:
         self.val_nll.reset()
         self.val_metrics.reset()
+        for metric in self.val_auxiliary_node_state_metrics.values():
+            metric.reset()
 
     def validation_step(self, data, i):
         # compatibility line
@@ -248,6 +338,14 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
                     "val/X_kl": metrics[1]['XKl'] * self.T,
                     "val/E_kl": metrics[1]['EKl'] * self.T,
                     "val/charges_kl": metrics[1]['ChargesKl'] * self.T}
+        if len(self.auxiliary_node_state_names) > 0:
+            aux_metrics = {
+                name: self.val_auxiliary_node_state_metrics[name].compute() * self.T
+                for name in self.auxiliary_node_state_names
+            }
+            log_dict["val/auxiliary_node_states_kl"] = sum(aux_metrics.values()) / len(aux_metrics)
+            for name, value in aux_metrics.items():
+                log_dict[f"val/{name}_kl"] = value
         self.log_dict(log_dict, on_epoch=True, on_step=False, sync_dist=True)
         # if wandb.run:
         #     wandb.log(log_dict)
@@ -291,6 +389,8 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         #     utils.setup_wandb(self.cfg)
         self.test_nll.reset()
         self.test_metrics.reset()
+        for metric in self.test_auxiliary_node_state_metrics.values():
+            metric.reset()
 
     def test_step(self, data, i):
         # compatibility line
@@ -313,6 +413,14 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
                     "test/X_kl": metrics[1]['XKl'] * self.T,
                     "test/E_kl": metrics[1]['EKl'] * self.T,
                     "test/charges_kl": metrics[1]['ChargesKl'] * self.T}
+        if len(self.auxiliary_node_state_names) > 0:
+            aux_metrics = {
+                name: self.test_auxiliary_node_state_metrics[name].compute() * self.T
+                for name in self.auxiliary_node_state_names
+            }
+            log_dict["test/auxiliary_node_states_kl"] = sum(aux_metrics.values()) / len(aux_metrics)
+            for name, value in aux_metrics.items():
+                log_dict[f"test/{name}_kl"] = value
         self.log_dict(log_dict, sync_dist=True)
 
         print_str = []
@@ -445,9 +553,15 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         probX = clean_data.X @ Qtb.X + 1e-7  # (bs, n, dx_out)
         probE = clean_data.E @ Qtb.E.unsqueeze(1) + 1e-7  # (bs, n, n, de_out)
         probc = clean_data.charges @ Qtb.charges + 1e-7
+        prob_auxiliary_node_states = collections.OrderedDict(
+            (name, clean_data.auxiliary_node_states[name] @ Qtb.auxiliary_node_states[name] + 1e-7)
+            for name in self.auxiliary_node_state_names
+        )
         probX = probX / probX.sum(dim=-1, keepdims=True)
         probE = probE / probE.sum(dim=-1, keepdims=True)
         probc = probc / probc.sum(dim=-1, keepdims=True)
+        for name, prob_aux in prob_auxiliary_node_states.items():
+            prob_auxiliary_node_states[name] = prob_aux / prob_aux.sum(dim=-1, keepdims=True)
         assert probX.shape == clean_data.X.shape
 
         bs, n, _ = probX.shape
@@ -459,6 +573,8 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         probX[~node_mask] = limit_dist.X.view(1,1,-1).expand_as(probX)[~node_mask]
         #probc[~node_mask] = limit_dist.charges.float()
         probc[~node_mask] = limit_dist.charges.view(1,1,-1).expand_as(probc)[~node_mask]
+        for name, prob_aux in prob_auxiliary_node_states.items():
+            prob_aux[~node_mask] = limit_dist.auxiliary_node_states[name].view(1, 1, -1).expand_as(prob_aux)[~node_mask]
         diag_mask = ~torch.eye(node_mask.size(1), device=node_mask.device, dtype=torch.bool).unsqueeze(0)
         edge_mask = node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask
         #probE[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = limit_dist.E.float()
@@ -467,6 +583,14 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         kl_distance_X = F.kl_div(input=probX.log(), target=limit_dist.X[None, None, :], reduction='none')
         kl_distance_E = F.kl_div(input=probE.log(), target=limit_dist.E[None, None, None, :], reduction='none')
         kl_distance_c = F.kl_div(input=probc.log(), target=limit_dist.charges[None, None, :], reduction='none')
+        kl_distance_auxiliary_node_states = [
+            F.kl_div(
+                input=prob_auxiliary_node_states[name].log(),
+                target=limit_dist.auxiliary_node_states[name][None, None, :],
+                reduction='none',
+            )
+            for name in self.auxiliary_node_state_names
+        ]
 
         # Compute the kl on the positions
         last = self.T * torch.ones((bs, 1), device=clean_data.pos.device, dtype=torch.long)
@@ -474,14 +598,28 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         sigma_T = self.noise_model.get_sigma_bar(t_int=last, key='p')[:, :, None]
         subspace_d = 3 * node_mask.long().sum(dim=1)[:, None, None] - 3
         kl_distance_pos = subspace_d * diffusion_utils.gaussian_KL(mu_T, sigma_T)
+        kl_distance_aux = sum(
+            (sum_except_batch(value) for value in kl_distance_auxiliary_node_states),
+            torch.zeros_like(sum_except_batch(kl_distance_X)),
+        )
         return (sum_except_batch(kl_distance_X) + sum_except_batch(kl_distance_E) + sum_except_batch(kl_distance_c) +
-                sum_except_batch(kl_distance_pos))
+            kl_distance_aux + sum_except_batch(kl_distance_pos))
 
     def compute_Lt(self, clean_data, pred, z_t, s_int, node_mask, test):
         # TODO: ideally all probabilities should be computed in log space
         t_int = z_t.t_int
-        pred = utils.PlaceHolder(X=F.softmax(pred.X, dim=-1), charges=F.softmax(pred.charges, dim=-1),
-                                 E=F.softmax(pred.E, dim=-1), pos=pred.pos, node_mask=clean_data.node_mask, y=None)
+        pred = utils.PlaceHolder(
+            X=F.softmax(pred.X, dim=-1),
+            charges=F.softmax(pred.charges, dim=-1),
+            E=F.softmax(pred.E, dim=-1),
+            pos=pred.pos,
+            node_mask=clean_data.node_mask,
+            y=None,
+            auxiliary_node_states=collections.OrderedDict(
+                (name, F.softmax(pred.auxiliary_node_states[name], dim=-1))
+                for name in self.auxiliary_node_state_names
+            ),
+        )
 
         Qtb = self.noise_model.get_Qt_bar(z_t.t_int)
         Qsb = self.noise_model.get_Qt_bar(s_int)
@@ -510,7 +648,18 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
         prob_true.pos = prefactor * clean_data.pos
         prob_pred.pos = prefactor * pred.pos
         metrics = (self.test_metrics if test else self.val_metrics)(prob_pred, prob_true)
-        return self.T * (metrics['PosMSE'] + metrics['XKl'] + metrics['ChargesKl'] + metrics['EKl'])
+        auxiliary_metrics = [
+            (self.test_auxiliary_node_state_metrics if test else self.val_auxiliary_node_state_metrics)[name](
+                prob_pred.auxiliary_node_states[name],
+                prob_true.auxiliary_node_states[name],
+            )
+            for name in self.auxiliary_node_state_names
+        ]
+        auxiliary_metric_total = (
+            sum(auxiliary_metrics) / len(auxiliary_metrics)
+            if len(auxiliary_metrics) > 0 else 0.0
+        )
+        return self.T * (metrics['PosMSE'] + metrics['XKl'] + metrics['ChargesKl'] + metrics['EKl'] + auxiliary_metric_total)
 
     def compute_val_loss(self, pred, z_t, clean_data, test=False):
         """Computes an estimator for the variational lower bound, or the simple loss (MSE).
@@ -609,7 +758,11 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
             y = y,
             node_pos = pos,
             node_charges = charges,
-            node_mask = node_mask
+            node_mask = node_mask,
+            **{
+                name: sampled.auxiliary_node_states[name]
+                for name in self.auxiliary_node_state_names
+            }
         ).apply_mask()
         # then transform DenseGraph to SparseGraph (batched)
         output_graph = sparsify_data(

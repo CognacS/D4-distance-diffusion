@@ -17,6 +17,7 @@ from typing import Optional, Dict, Tuple
 import math
 
 import torch
+import torch._dynamo
 import torch.nn as nn
 from torch.nn.modules.dropout import Dropout
 from torch.nn.modules.linear import Linear
@@ -308,6 +309,12 @@ class GraphSelfAttention(nn.Module):
         
         self.masked_softmax = MaskedSoftmax(dim=2)
 
+    @torch._dynamo.disable
+    def _apply_y_to_x(self, y: Tensor) -> tuple[Tensor, Tensor]:
+        yx_add = self.y_x_add(y).unsqueeze(1)
+        yx_mul = self.y_x_mul(y).unsqueeze(1)
+        return yx_add, yx_mul
+
     def forward(
         self,
         X: Tensor,
@@ -390,8 +397,7 @@ class GraphSelfAttention(nn.Module):
         
 
         # Incorporate y to X
-        yx1 = self.y_x_add(y).unsqueeze(1)                     # bs, 1, dx
-        yx2 = self.y_x_mul(y).unsqueeze(1)
+        yx1, yx2 = self._apply_y_to_x(y)                           # bs, 1, dx
         newX = weighted_V * (yx2 + 1) + yx1
 
         # Output X

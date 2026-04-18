@@ -1,4 +1,5 @@
 from typing import Optional,Tuple
+import collections
 
 import math
 
@@ -317,11 +318,15 @@ class GraphTransformer(nn.Module):
         self.out_dim_E = output_dims.E
         self.out_dim_y = output_dims.y
         self.out_dim_charges = output_dims.charges
+        self.auxiliary_node_state_dims = collections.OrderedDict(getattr(output_dims, 'auxiliary_node_states', {}))
+        self.auxiliary_node_state_names = list(self.auxiliary_node_state_dims.keys())
+        self.out_dim_auxiliary_node_states = sum(self.auxiliary_node_state_dims.values())
+        self.in_dim_auxiliary_node_states = sum(getattr(input_dims, 'auxiliary_node_states', {}).values())
 
         act_fn_in = nn.ReLU()
         act_fn_out = nn.ReLU()
 
-        self.mlp_in_X = nn.Sequential(nn.Linear(input_dims.X + input_dims.charges, hidden_mlp_dims['X']), act_fn_in,
+        self.mlp_in_X = nn.Sequential(nn.Linear(input_dims.X + input_dims.charges + self.in_dim_auxiliary_node_states, hidden_mlp_dims['X']), act_fn_in,
                                       nn.Linear(hidden_mlp_dims['X'], hidden_dims['dx']), act_fn_in)
         self.mlp_in_E = nn.Sequential(nn.Linear(input_dims.E, hidden_mlp_dims['E']), act_fn_in,
                                       nn.Linear(hidden_mlp_dims['E'], hidden_dims['de']), act_fn_in)
@@ -341,7 +346,7 @@ class GraphTransformer(nn.Module):
                                         for i in range(n_layers)])
 
         self.mlp_out_X = nn.Sequential(nn.Linear(hidden_dims['dx'], hidden_mlp_dims['X']), act_fn_out,
-                                       nn.Linear(hidden_mlp_dims['X'], output_dims.X + output_dims.charges))
+                           nn.Linear(hidden_mlp_dims['X'], output_dims.X + output_dims.charges + self.out_dim_auxiliary_node_states))
         self.mlp_out_E = nn.Sequential(nn.Linear(hidden_dims['de'], hidden_mlp_dims['E']), act_fn_out,
                                        nn.Linear(hidden_mlp_dims['E'], output_dims.E))
         # self.mlp_out_y = nn.Sequential(nn.Linear(hidden_dims['dy'], hidden_mlp_dims['y']), act_fn_out,
@@ -354,9 +359,23 @@ class GraphTransformer(nn.Module):
 
         diag_mask = ~torch.eye(n, device=data.X.device, dtype=torch.bool)
         diag_mask = diag_mask.unsqueeze(0).unsqueeze(-1).expand(bs, -1, -1, -1)
-        X = torch.cat((data.X, data.charges), dim=-1)
+        auxiliary_node_state_values = [
+            data.auxiliary_node_states[name]
+            for name in self.auxiliary_node_state_names
+        ]
+        X = torch.cat((data.X, data.charges, *auxiliary_node_state_values), dim=-1)
 
-        X_to_out = X[..., :self.out_dim_X + self.out_dim_charges]
+        X_to_out = torch.cat(
+            [
+                data.X[..., :self.out_dim_X],
+                data.charges[..., :self.out_dim_charges],
+                *[
+                    data.auxiliary_node_states[name][..., :self.auxiliary_node_state_dims[name]]
+                    for name in self.auxiliary_node_state_names
+                ],
+            ],
+            dim=-1,
+        )
         E_to_out = data.E[..., :self.out_dim_E]
         y_to_out = data.y[..., :self.out_dim_y]
 
@@ -381,6 +400,20 @@ class GraphTransformer(nn.Module):
         E = 1/2 * (E + torch.transpose(E, 1, 2))
 
         final_X = X[..., :self.out_dim_X]
-        charges = X[..., self.out_dim_X:]
-        out = utils.PlaceHolder(pos=pos, X=final_X, charges=charges, E=E, y=y, node_mask=node_mask).mask()
+        offset = self.out_dim_X
+        charges = X[..., offset:offset + self.out_dim_charges]
+        offset += self.out_dim_charges
+        auxiliary_node_states = collections.OrderedDict()
+        for name, num_classes in self.auxiliary_node_state_dims.items():
+            auxiliary_node_states[name] = X[..., offset:offset + num_classes]
+            offset += num_classes
+        out = utils.PlaceHolder(
+            pos=pos,
+            X=final_X,
+            charges=charges,
+            E=E,
+            y=y,
+            node_mask=node_mask,
+            auxiliary_node_states=auxiliary_node_states,
+        ).mask()
         return out

@@ -10,6 +10,8 @@ defaults:
 method:
     model:
         params:
+            dataset_auxiliary_node_states:
+                include_in_diffusion: true
             cfg:
                 general:
                     name : 'noh_ada3'
@@ -29,12 +31,14 @@ method:
                 model:
                     n_layers: 10
                     lambda_train: [5, 0.4, 1, 2, 0]
+                    lambda_train_auxiliary_node_states: 1.0
                     nu:
                         p: 2.5
                         x: 1
                         c: 1
                         e: 1.5
                         y: 1
+                        auxiliary_node_states: 1
                 dataset:
                     remove_h: True
                     pin_memory: True
@@ -54,4 +58,4 @@ config_name: qm9-midi-atom_details
 seed: 0
 
 mode: train+eval
-compile: true
+compile: false
