@@ -12,7 +12,7 @@ from torch_geometric.data import extract_zip, download_url
 from torch_geometric.io.fs import makedirs
 from torch_geometric.datasets.qm9 import conversion
 
-from src.data.datasets.core import RawDataset, DataResources, DatasetException, DEFAULT_DATASET_PATH, DEFAULT_SPLITS
+from src.data.datasets.core import RawDataset, DataResources, DatasetException, DEFAULT_DATASET_PATH
 from src.data.datasets.molecular import MolecularGraphsDataset, SmilesDataset
 from src.data.datasets.atom_types_representation import AUXILIARY_NODE_STATES_STATS_KEY
 
@@ -29,6 +29,7 @@ QM9_RAW_CSV = 'gdb9.sdf.csv'
 QM9_SKIP_FILE = '3195404'
 
 DEFAULT_DATASET_PATH_QM9 = osp.join(DEFAULT_DATASET_PATH, 'qm9')
+DEFAULT_QM9_SPLITS = {'train': None, 'valid': 10000, 'test': 10000}
     
 
 def apply_unit_conversion(header: List[str], properties: List[OrderedDict]) -> List[OrderedDict]:
@@ -307,7 +308,7 @@ class QM9Smiles(SmilesDataset):
         )
 
 
-from src.data.datasets.split import random_split_dataset
+from src.data.datasets.split import random_split_dataset, validate_cached_splits
 from src.data.datasets import reg_dataresources
 
 @reg_dataresources.register('qm9')
@@ -352,7 +353,7 @@ class QM9Resources(DataResources):
         }
 
         if random_splits is None:
-            random_splits = DEFAULT_SPLITS
+            random_splits = DEFAULT_QM9_SPLITS.copy()
         self.random_splits = random_splits
 
         self.preproc = {
@@ -392,6 +393,9 @@ class QM9Resources(DataResources):
                 ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
 
             dss = random_split_dataset([ds, ds_smiles], self.random_splits)
+
+        if self.random_splits:
+            validate_cached_splits(dss, self.random_splits, len(ds))
 
         self.info = {split: self.wrap_dataset(d[0]).stats for split, d in dss.items()}
 
@@ -460,7 +464,7 @@ class QM9Resources(DataResources):
         }
 
         if random_splits is None:
-            random_splits = DEFAULT_SPLITS
+            random_splits = DEFAULT_QM9_SPLITS.copy()
         self.random_splits = random_splits
 
         self.preproc = {
@@ -500,6 +504,9 @@ class QM9Resources(DataResources):
                 ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
 
             dss = random_split_dataset([ds, ds_smiles], self.random_splits)
+
+        if self.random_splits:
+            validate_cached_splits(dss, self.random_splits, len(ds))
 
         self.info = {split: self.wrap_dataset(d[0]).stats for split, d in dss.items()}
 
@@ -568,7 +575,7 @@ class QM9Resources(DataResources):
         }
 
         if random_splits is None:
-            random_splits = DEFAULT_SPLITS
+            random_splits = DEFAULT_QM9_SPLITS.copy()
         self.random_splits = random_splits
 
         self.preproc = {
@@ -608,6 +615,9 @@ class QM9Resources(DataResources):
                 ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
 
             dss = random_split_dataset([ds, ds_smiles], self.random_splits)
+
+        if self.random_splits:
+            validate_cached_splits(dss, self.random_splits, len(ds))
 
         self.info = {split: self.wrap_dataset(d[0]).stats for split, d in dss.items()}
 

@@ -17,9 +17,9 @@ from src.data.transforms.core import TransformAdapter
 
 DEFAULT_DATASET_PATH = 'datasets'
 DEFAULT_SPLITS = {
-    'train': 0.8,
-    'val': 0.2,
-    'test': 0.2,
+    'train': None,
+    'valid': 0.1,
+    'test': 0.1,
 }
 
 class DatasetException(Exception):

@@ -349,10 +349,11 @@ class BaseDigResources(DataResources):
                 ] for split in self.random_splits
             }
 
-            dss['test'] = [
-                self.dataset_cls(self.root, split='test', **self.preproc, **self.dataset_cfg),
-                self.smiles_cls(self.root, split='test', **self.smiles_cfg)
-            ]
+            if self.random_splits:
+                dss['test'] = [
+                    self.dataset_cls(self.root, split='test', **self.preproc, **self.dataset_cfg),
+                    self.smiles_cls(self.root, split='test', **self.smiles_cfg)
+                ]
 
         except DatasetException: # if not possible, create the splits
 

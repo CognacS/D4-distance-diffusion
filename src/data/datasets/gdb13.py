@@ -202,7 +202,7 @@ class GDB13Smiles(SmilesDataset):
         )
 
 
-from src.data.datasets.split import random_split_dataset
+from src.data.datasets.split import random_split_dataset, validate_cached_splits
 from src.data.datasets import reg_dataresources
 
 @reg_dataresources.register('gdb13')
@@ -293,6 +293,9 @@ class GDB13Resources(DataResources):
                 ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
 
             dss = random_split_dataset([ds, ds_smiles], self.random_splits)
+
+        if self.random_splits:
+            validate_cached_splits(dss, self.random_splits, len(ds))
 
         self.info = {split: self.wrap_dataset(d[0]).stats for split, d in dss.items()}
 
@@ -408,6 +411,9 @@ class GDB13Resources(DataResources):
 
             dss = random_split_dataset([ds, ds_smiles], self.random_splits)
 
+        if self.random_splits:
+            validate_cached_splits(dss, self.random_splits, len(ds))
+
         self.info = {split: self.wrap_dataset(d[0]).stats for split, d in dss.items()}
 
         self._prepared = True
@@ -521,6 +527,9 @@ class GDB13Resources(DataResources):
                 ds.reapply_pre_transform(self.preproc['pre_transform'], self.preproc['pre_filter'])
 
             dss = random_split_dataset([ds, ds_smiles], self.random_splits)
+
+        if self.random_splits:
+            validate_cached_splits(dss, self.random_splits, len(ds))
 
         self.info = {split: self.wrap_dataset(d[0]).stats for split, d in dss.items()}
 

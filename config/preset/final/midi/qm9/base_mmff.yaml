@@ -58,4 +58,4 @@ config_name: qm9-midi-mmff
 seed: 0
 
 mode: train+eval
-compile: true
+compile: false

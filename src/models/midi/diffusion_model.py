@@ -343,7 +343,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
                 name: self.val_auxiliary_node_state_metrics[name].compute() * self.T
                 for name in self.auxiliary_node_state_names
             }
-            log_dict["val/auxiliary_node_states_kl"] = sum(aux_metrics.values()) / len(aux_metrics)
+            log_dict["val/auxiliary_node_states_kl"] = sum(aux_metrics.values())
             for name, value in aux_metrics.items():
                 log_dict[f"val/{name}_kl"] = value
         self.log_dict(log_dict, on_epoch=True, on_step=False, sync_dist=True)
@@ -418,7 +418,7 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
                 name: self.test_auxiliary_node_state_metrics[name].compute() * self.T
                 for name in self.auxiliary_node_state_names
             }
-            log_dict["test/auxiliary_node_states_kl"] = sum(aux_metrics.values()) / len(aux_metrics)
+            log_dict["test/auxiliary_node_states_kl"] = sum(aux_metrics.values())
             for name, value in aux_metrics.items():
                 log_dict[f"test/{name}_kl"] = value
         self.log_dict(log_dict, sync_dist=True)
@@ -655,10 +655,9 @@ class MixedGraphSpatialDenoisingDiffusionModel(GeneratorWithEvaluation):
             )
             for name in self.auxiliary_node_state_names
         ]
-        auxiliary_metric_total = (
-            sum(auxiliary_metrics) / len(auxiliary_metrics)
-            if len(auxiliary_metrics) > 0 else 0.0
-        )
+        # KL terms add for the joint distribution. Averaging is appropriate for
+        # balancing the training loss, but undercounts the likelihood estimate.
+        auxiliary_metric_total = sum(auxiliary_metrics)
         return self.T * (metrics['PosMSE'] + metrics['XKl'] + metrics['ChargesKl'] + metrics['EKl'] + auxiliary_metric_total)
 
     def compute_val_loss(self, pred, z_t, clean_data, test=False):

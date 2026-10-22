@@ -5,6 +5,47 @@ import os.path as osp
 from torch.utils.data import Dataset
 
 import random
+import math
+
+
+def get_split_sizes(size, splits):
+    """Resolve counts before writing any subsets; reject over-allocation."""
+    sizes = {}
+    remainder = None
+    for name, value in splits.items():
+        if value is None:
+            if remainder is not None:
+                raise ValueError('Only one split can have None as value to accumulate the rest of the data')
+            remainder = name
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f'Invalid size for split {name}: {value!r}')
+        if value < 0 or not math.isfinite(value) or (isinstance(value, float) and value > 1):
+            raise ValueError(f'Invalid size for split {name}: {value!r}')
+        sizes[name] = value if isinstance(value, int) else int(value * size)
+    allocated = sum(sizes.values())
+    if allocated > size:
+        raise ValueError(f'Splits request {allocated} records, but the dataset contains only {size}. No subsets were written.')
+    if remainder is not None:
+        sizes[remainder] = size - allocated
+    elif allocated != size:
+        if splits and all(isinstance(value, float) for value in splits.values()) and math.isclose(sum(splits.values()), 1.0):
+            # Integer truncation may leave a few records for valid ratios.
+            sizes[next(reversed(sizes))] += size - allocated
+        else:
+            raise ValueError(f'Splits cover {allocated} of {size} records. Set one split to None to include the remainder.')
+    return sizes
+
+
+def validate_cached_splits(datasets, splits, total_size):
+    """Existing files must match the requested graph and SMILES counts."""
+    for name, expected in get_split_sizes(total_size, splits).items():
+        actual = [len(dataset) for dataset in datasets[name]]
+        if any(count != expected for count in actual):
+            raise ValueError(
+                f'Cached split {name!r} has graph/SMILES counts {actual}; expected {expected}. '
+                'The cached partition does not match the configuration. Audit and repair the splits before training.'
+            )
 
 
 def split_dataset(dataset: Dataset|List[Dataset], splits_and_indices: Dict[str, List[int]]) -> Dict[str, Dataset]:
@@ -44,30 +85,14 @@ def random_split_dataset(dataset: Dataset|List[Dataset], splits_and_fracts_or_nu
 
     indices = list(range(n))
 
-    if seed is not None:
-        random.seed(seed)
-
-    random.shuffle(indices)
+    split_sizes = get_split_sizes(n, splits_and_fracts_or_nums)
+    random.Random(seed).shuffle(indices)
 
     splits_and_indices = {}
     start = 0
-    accumulate_rest = None
-    for split_name, split_fract_or_num in splits_and_fracts_or_nums.items():
-        # accumulate the rest of the data if needed
-        if split_fract_or_num == None:
-            if accumulate_rest is not None:
-                raise ValueError('Only one split can have None as value to accumulate the rest of the data')
-            accumulate_rest = split_name
-            continue
-
-        # split the data
-        split_len = split_fract_or_num if isinstance(split_fract_or_num, int) else int(split_fract_or_num * n)
+    for split_name, split_len in split_sizes.items():
         end = start + split_len
         splits_and_indices[split_name] = indices[start:end]
         start = end
-
-    # accumulate the rest of the data if needed
-    if accumulate_rest is not None:
-        splits_and_indices[accumulate_rest] = indices[start:]
 
     return split_dataset(dataset, splits_and_indices)

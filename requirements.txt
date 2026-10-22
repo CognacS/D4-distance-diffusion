@@ -6,7 +6,7 @@ scipy
 setuptools
 torchmetrics
 tqdm
-wandb
+wandb==0.25.1
 pygsp
 pyemd
 fcd_torch

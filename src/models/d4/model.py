@@ -1227,7 +1227,7 @@ def to_onehot_data(d, **classes_nums):
     elif isinstance(d, DenseGraph):
         ret_d = d
         for key, num_classes in classes_nums.items():
-            if num_classes <= 1 or not hasattr(ret_d, key):
+            if key == 'edge_dist' or num_classes < 1 or not hasattr(ret_d, key):
                 continue
             value = getattr(ret_d, key)
             if value is None:
@@ -1266,4 +1266,3 @@ def mask_data(d, **masks):
         raise NotImplementedError(f'Data of type {type(d)} during mask_data')
 
     return ret_d
-            

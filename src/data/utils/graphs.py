@@ -34,7 +34,9 @@ def get_torch_graphs_stats(graphs: List[SparseGraph]|ProcessedDataset, num_class
         num_classes['edge_attr'] += 1 # account for non-edges
     
     if num_classes is not None:
-        histograms = {key: torch.zeros(num_cls) for key, num_cls in num_classes.items()}
+        # Large datasets exceed float32's exact integer range, especially for
+        # non-edges. Accumulate counts in float64 before normalizing.
+        histograms = {key: torch.zeros(num_cls, dtype=torch.float64) for key, num_cls in num_classes.items()}
         
         for g in graphs:
             for key in num_classes.keys():
@@ -46,7 +48,7 @@ def get_torch_graphs_stats(graphs: List[SparseGraph]|ProcessedDataset, num_class
                         value = value + 1
                     
                     # this scatters values across the different types   
-                    histograms[key].scatter_add_(0, value.long(), torch.ones_like(value, dtype=torch.float))
+                    histograms[key].scatter_add_(0, value.long(), torch.ones_like(value, dtype=torch.float64))
                     
                 elif value.ndim == 2:
                     
@@ -55,7 +57,7 @@ def get_torch_graphs_stats(graphs: List[SparseGraph]|ProcessedDataset, num_class
                     else:
                         sl = slice(None)
                     
-                    histograms[key][sl] += value.sum(dim=0).float()
+                    histograms[key][sl] += value.sum(dim=0, dtype=torch.float64)
                 
                 if key == 'edge_attr':
                     histograms[key][0] += g.num_nodes * (g.num_nodes - 1) - g.num_edges
