@@ -55,3 +55,7 @@ Checkpoints are saved in a new directory ./checkpoints, and logging can be done 
 
 ## License
 This code is released under the MIT License. See LICENSE file for details.
+
+## Generated distribution comparison
+
+See [DISTRIBUTION_COMPARISON.md](DISTRIBUTION_COMPARISON.md) for separate train, validation and test reports under `outputs/distribution_comparison/<dataset>/<model>/<split>/`.

@@ -75,29 +75,16 @@ class JointComparisonTests(unittest.TestCase):
         result = joint.distributions(aggregate)
         self.assertEqual(result['atom_symbols']['C'], 2 / 3)
 
-    def test_new_analysis_forwards_dataset_and_split_and_uses_a_separate_report(self):
+    def test_new_analysis_delegates_to_the_unified_split_workflow(self):
         with tempfile.TemporaryDirectory(dir='/tmp') as directory:
             output = Path(directory) / 'new_analysis'
-            captured = {}
-
-            def run_analysis():
-                options = joint.analysis.parse_args()
-                captured['dataset'] = options.reference_dataset
-                captured['split'] = options.reference_split
-                options.output.parent.mkdir(parents=True)
-                options.output.write_text(json.dumps({'metadata': {'reference_dataset': 'gdb13', 'reference_split': 'valid'}}))
-
             arguments = ['compare_three_representations.py', '--reference-dataset', 'gdb13',
                          '--reference-split', 'valid', '--output-dir', str(output)]
             with patch.object(sys, 'argv', arguments), \
-                    patch.object(joint.analysis, 'main', side_effect=run_analysis), \
-                    patch.object(joint, 'make_plots', return_value={}), redirect_stdout(io.StringIO()):
-                joint.main()
+                    patch('compare_distributions.main', return_value=0) as run, redirect_stdout(io.StringIO()):
+                self.assertEqual(joint.main(), 0)
                 self.assertEqual(sys.argv, arguments)
-            self.assertEqual(captured, {'dataset': 'gdb13', 'split': 'valid'})
-            self.assertTrue((output / 'analysis/report.json').is_file())
-            result = json.loads((output / 'joint_comparison.json').read_text())
-            self.assertEqual(result['source_report'], str(output / 'analysis/report.json'))
+            run.assert_called_once_with(arguments[1:])
 
 
 if __name__ == '__main__':

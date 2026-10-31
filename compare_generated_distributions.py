@@ -111,8 +111,8 @@ def parse_args() -> Any:
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--reference-dataset", default="qm9")
     parser.add_argument("--reference-root", default=None)
-    parser.add_argument("--reference-split", default="test",
-                        help="test (default), train, valid/validation/val, or full")
+    parser.add_argument("--reference-split", default=None,
+                        help="train, valid/validation/val, test, or full; omitted: unified reports for train, validation and test")
     parser.add_argument("--checkpoints-root", type=Path, default=Path("checkpoints"))
     parser.add_argument("--model", choices=["d4", "midi"], default="d4")
     parser.add_argument("--representations", nargs="+", choices=["base", "mmff", "atom_details"],
@@ -126,7 +126,10 @@ def parse_args() -> Any:
     parser.add_argument("--max-generated", type=int, default=None, help="Sample cap PER training seed")
     parser.add_argument("--seed", type=int, default=0, help="Subsampling RNG seed (not the training seed)")
     parser.add_argument("--plot-top-k", type=int, default=PLOT_CATEGORY_LIMIT)
+    parser.add_argument("--skip-plots", action="store_true", help="Skip intermediate plots when a unified report generates its own figures")
     args = parser.parse_args()
+    if args.reference_split is None and args.output is not None:
+        parser.error("--output is a technical single-split report path; specify --reference-split or use compare_distributions.py --output-root")
     for name in ["max_reference", "max_generated", "plot_top_k"]:
         value = getattr(args, name)
         if value is not None and value < 1:
@@ -1044,8 +1047,11 @@ def strip_internal_fields(aggregate: Dict) -> Dict:
     return {key: value for key, value in aggregate.items() if key != "internals"}
 
 
-def main() -> None:
+def main() -> Optional[int]:
     args = parse_args()
+    if args.reference_split is None:
+        from compare_distributions import main as compare_all_splits
+        return compare_all_splits([*sys.argv[1:], "--model", args.model])
     torch.set_num_threads(4)
     dataset_name = resolve_dataset_name(args.reference_dataset)
     family = re.sub(r"_(mmff|atom_details)$", "", dataset_name)
@@ -1132,7 +1138,8 @@ def main() -> None:
             del aggregate
         entry["summary"] = summarize_runs(entry["runs"])
         output.write_text(json.dumps(round_floats(report), indent=2, allow_nan=False))
-    report["metadata"]["plot_files"] = write_comparison_plots(report, output.parent, args.plot_top_k)
+    report["metadata"]["plot_files"] = ([] if args.skip_plots else
+                                       write_comparison_plots(report, output.parent, args.plot_top_k))
     output.write_text(json.dumps(round_floats(report), indent=2, allow_nan=False))
     print("\nDistances against the same reference (mean ± sample std over available seeds):")
     for name, entry in report["representations"].items():
@@ -1146,4 +1153,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

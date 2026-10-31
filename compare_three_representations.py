@@ -259,6 +259,11 @@ def make_plots(report, output_dir, top_k=20, pdf=True):
 
 
 def main():
+    # --report retains the low-level plotter used by the unified pipeline.
+    # New analyses use the complete, split-separated report workflow.
+    if not any(argument == "--report" or argument.startswith("--report=") for argument in sys.argv[1:]):
+        from compare_distributions import main as compare_all_splits
+        return compare_all_splits(sys.argv[1:])
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                      epilog="Senza --report sono accettate tutte le opzioni del precedente script, "
                                             "tra cui --generated NAME=PATH, --model, --reference-root e --max-generated.")
@@ -301,4 +306,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
