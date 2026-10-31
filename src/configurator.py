@@ -664,7 +664,7 @@ class RunContext:
             ###################  IF PATH HAS TO BE CREATED  ####################
             else:
                 # generate run id
-                run_id = wandb.util.generate_id()
+                run_id = wandb.sdk.lib.runid.generate_id()
                 version = 0
                 
                 # check that the run path exists, and if not, create it
@@ -683,7 +683,7 @@ class RunContext:
             return run_path, version_dir, version, run_id
         
         else:
-            return None, None, 0, wandb.util.generate_id()
+            return None, None, 0, wandb.sdk.lib.runid.generate_id()
 
     # # new version where there are no version, but in the name, the character 'v' is followed by the seed
     # def _setup_run_directory(self, config_name: str) -> Tuple[Path, int, str]:
@@ -738,7 +738,7 @@ class RunContext:
     #         ###################  IF PATH HAS TO BE CREATED  ####################
     #         else:
     #             # generate run id
-    #             run_id = wandb.util.generate_id()
+    #             run_id = wandb.sdk.lib.runid.generate_id()
     #             seed = self.cfg['seed']
     #             version = -1
                 
@@ -764,7 +764,7 @@ class RunContext:
     #         return run_path, version_dir, version, run_id
         
     #     else:
-    #         return None, None, self.cfg['seed'], wandb.util.generate_id()
+    #         return None, None, self.cfg['seed'], wandb.sdk.lib.runid.generate_id()
         
     ############################################################################
     #                          CONFIGURATION METHODS                           #

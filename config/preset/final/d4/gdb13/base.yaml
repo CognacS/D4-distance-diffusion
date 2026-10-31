@@ -48,5 +48,5 @@ logger:
 config_name: gdb13-d4
 
 mode: train+eval
-compile: true
+compile: false
 seed: 0
