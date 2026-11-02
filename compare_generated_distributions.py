@@ -26,7 +26,6 @@ import re
 import pickle
 import statistics
 import sys
-import yaml
 import math
 import warnings
 
@@ -38,6 +37,8 @@ from rdkit import Chem
 from rdkit import RDLogger
 from rdkit.Chem import AllChem, rdchem, rdmolfiles
 from tqdm.auto import tqdm
+
+from distribution_run_metadata import metadata_search_roots, read_run_metadata
 
 from torch_geometric.data import InMemoryDataset
 from src.datatypes.sparse import SparseGraph
@@ -114,6 +115,8 @@ def parse_args() -> Any:
     parser.add_argument("--reference-split", default=None,
                         help="train, valid/validation/val, test, or full; omitted: unified reports for train, validation and test")
     parser.add_argument("--checkpoints-root", type=Path, default=Path("checkpoints"))
+    parser.add_argument("--wandb-root", type=Path, action="append", default=[],
+                        help="Additional local W&B directory (repeatable; online and offline runs)")
     parser.add_argument("--model", choices=["d4", "midi"], default="d4")
     parser.add_argument("--representations", nargs="+", choices=["base", "mmff", "atom_details"],
                         default=["base", "mmff", "atom_details"])
@@ -838,42 +841,6 @@ def emit_warning(message: str, messages: List[str]) -> None:
     print(f"WARNING: {message}", file=sys.stderr, flush=True)
 
 
-def unwrap_config(value):
-    return value.get("value") if isinstance(value, dict) and "value" in value else value
-
-
-def read_run_metadata(run_dir: Path, checkpoints_root: Path) -> Dict[str, Any]:
-    """Read seed from saved config/arguments, never from the vN directory counter."""
-    candidates = [run_dir / "config.yaml", run_dir / ".hydra/config.yaml"]
-    wandb_roots = {checkpoints_root / "wandb", run_dir.parent.parent / "wandb"}
-    for root in sorted(wandb_roots):
-        candidates.extend(sorted(root.glob(f"run-*-{run_dir.name}/files/config.yaml")))
-    evidence = []
-    dataset_names = set()
-    for path in candidates:
-        if not path.is_file():
-            continue
-        config = yaml.safe_load(path.read_text()) or {}
-        value = unwrap_config(config.get("seed"))
-        if value is not None:
-            evidence.append((int(value), str(path)))
-        task = unwrap_config(config.get("task", {})) or {}
-        if task.get("dataset", {}).get("name"):
-            dataset_names.add(task["dataset"]["name"])
-    for root in sorted(wandb_roots):
-        for path in sorted(root.glob(f"run-*-{run_dir.name}/files/wandb-metadata.json")):
-            metadata = json.loads(path.read_text())
-            for arg in metadata.get("args", []):
-                match = re.fullmatch(r"\+{0,2}seed=(-?\d+)", arg)
-                if match:
-                    evidence.append((int(match.group(1)), str(path)))
-    seeds = {seed for seed, _ in evidence}
-    if len(seeds) > 1 or len(dataset_names) > 1:
-        raise ValueError(f"Conflicting run metadata in {run_dir}: {evidence}, datasets={dataset_names}")
-    return {"seed": next(iter(seeds), None), "seed_sources": sorted({path for _, path in evidence}),
-            "dataset_name": next(iter(dataset_names), None)}
-
-
 def generated_files(path: Path) -> List[Path]:
     if path.is_file():
         return [path]
@@ -881,7 +848,7 @@ def generated_files(path: Path) -> List[Path]:
 
 
 def discover_runs(paths: List[Path], checkpoints_root: Path, expected_seeds: List[int],
-                  messages: List[str]) -> List[Dict[str, Any]]:
+                  messages: List[str], wandb_roots=()) -> List[Dict[str, Any]]:
     by_run = {}
     for path in paths:
         if not path.exists():
@@ -895,10 +862,13 @@ def discover_runs(paths: List[Path], checkpoints_root: Path, expected_seeds: Lis
         chosen = files[0]
         if len(files) > 1:
             emit_warning(f"Multiple generations in {directory}; using latest file {chosen.name}", messages)
-        metadata = read_run_metadata(directory, checkpoints_root)
+        metadata = read_run_metadata(directory, checkpoints_root, wandb_roots)
         seed = metadata["seed"]
         if seed is None:
-            emit_warning(f"Skipping {directory}: training seed is unknown (saved config/W&B metadata required)", messages)
+            roots = ", ".join(map(str, metadata_search_roots(directory, checkpoints_root, wandb_roots)))
+            emit_warning(f"Skipping {directory}: training seed is unknown (saved config/W&B metadata required). "
+                         f"Checked local config.yaml/.hydra/config.yaml and online/offline W&B runs in: {roots}. "
+                         "Use --wandb-root for another metadata location; vN is not a seed.", messages)
             continue
         if seed not in expected_seeds:
             emit_warning(f"Skipping {directory}: seed {seed} is outside expected seeds {expected_seeds}", messages)
@@ -938,6 +908,9 @@ def experiment_paths(args, family: str, messages: List[str]) -> Dict[str, List[P
         if len(available) > 1:
             emit_warning(f"{name}: multiple experiment folders; using {available[0]}, ignoring {available[1:]}. "
                          "Use --generated NAME=PATH to choose explicitly.", messages)
+        if not available:
+            emit_warning(f"{name}: no generated_graphs*.pkl/pt found in {candidates}. "
+                         "Generate samples first, or use --checkpoints-root/--generated for another location.", messages)
         result[name] = [available[0]] if available else []
     return result
 
@@ -1063,7 +1036,7 @@ def main() -> Optional[int]:
     paths = experiment_paths(args, family, messages)
     selected = {}
     for name, folders in paths.items():
-        selected[name] = discover_runs(folders, args.checkpoints_root, args.expected_seeds, messages)
+        selected[name] = discover_runs(folders, args.checkpoints_root, args.expected_seeds, messages, args.wandb_root)
         found = [run["seed"] for run in selected[name]]
         missing = sorted(set(args.expected_seeds) - set(found))
         print(f"{name}: available seeds={found}; missing seeds={missing}", flush=True)

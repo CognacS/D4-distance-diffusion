@@ -34,6 +34,8 @@ def parse_args(argv=None):
     parser.add_argument("--model", "--models", nargs="+", dest="models", choices=tuple(MODEL_LABELS),
                         default=list(MODEL_LABELS))
     parser.add_argument("--checkpoints-root", type=Path, default=Path("checkpoints"))
+    parser.add_argument("--wandb-root", type=Path, action="append", default=[],
+                        help="Additional local W&B directory (repeatable; online and offline runs)")
     parser.add_argument("--representations", nargs="+", choices=tuple(LABELS), default=list(LABELS))
     parser.add_argument("--generated", action="append", help="Explicit NAME=PATH source; requires one --model")
     parser.add_argument("--expected-seeds", nargs="+", type=int, default=[0, 1, 2])
@@ -61,6 +63,7 @@ def parse_args(argv=None):
             parser.error("--" + name.replace("_", "-") + " must be positive")
     if not 0 < args.alpha < 1:
         parser.error("--alpha must be between 0 and 1")
+    args.wandb_root = [root.expanduser().resolve() for root in args.wandb_root]
     args.output_root = args.output_root.resolve()
     args.checkpoints_root = args.checkpoints_root.resolve()
     if args.reference_root is not None:
@@ -78,10 +81,12 @@ def select_sources(args, model):
     # experiment_paths reads args.model; the orchestrator supports several models.
     options = argparse.Namespace(**vars(args), model=model)
     for name, paths in analysis.experiment_paths(options, family, messages).items():
-        for run in analysis.discover_runs(paths, args.checkpoints_root, args.expected_seeds, messages):
+        for run in analysis.discover_runs(paths, args.checkpoints_root, args.expected_seeds, messages, args.wandb_root):
             selected.append(f"{name}={run['generated_file']}")
     if not selected:
-        raise ValueError(f"No saved generations with identifiable training seeds for {dataset}/{model}")
+        diagnostics = "\n".join(messages)
+        raise ValueError(f"No saved generations with identifiable training seeds for {dataset}/{model}"
+                         + ("\n\nDiscovery diagnostics:\n" + diagnostics if diagnostics else ""))
     return selected, messages
 
 
@@ -94,6 +99,8 @@ def scope_commands(args, model, split, directory, sources):
                 "--model", model, "--checkpoints-root", str(args.checkpoints_root),
                 "--expected-seeds", *map(str, args.expected_seeds), "--seed", str(args.seed),
                 "--output", str(raw), "--skip-plots"]
+    for root in args.wandb_root:
+        analysis += ["--wandb-root", str(root)]
     for source in sources:
         analysis += ["--generated", source]
     for option in ("reference_root", "max_reference", "max_generated"):

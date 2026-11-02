@@ -55,6 +55,26 @@ def fake_step(command, **kwargs):
 
 
 class DistributionWorkflowTests(unittest.TestCase):
+    def test_explicit_wandb_roots_are_forwarded_to_analysis(self):
+        args = workflow.parse_args(['--wandb-root', '/remote/logs', '--wandb-root', '/remote/archive'])
+        self.assertEqual(args.wandb_root, [Path('/remote/logs'), Path('/remote/archive')])
+        command = workflow.scope_commands(args, 'd4', 'test', Path('/output'), ['base=/samples.pkl'])[0][1]
+        roots = [command[index + 1] for index, token in enumerate(command) if token == '--wandb-root']
+        self.assertEqual(roots, ['/remote/logs', '/remote/archive'])
+
+    def test_source_selection_failure_preserves_discovery_diagnostics(self):
+        from types import SimpleNamespace
+        import sys
+        def missing(paths, checkpoints, seeds, messages, roots):
+            messages.append('training seed is unknown: offline metadata missing')
+            return []
+        analysis = SimpleNamespace(resolve_dataset_name=lambda name: name,
+                                   experiment_paths=lambda *args: {'base': [Path('/samples')]},
+                                   discover_runs=missing)
+        with patch.dict(sys.modules, {'compare_generated_distributions': analysis}):
+            with self.assertRaisesRegex(ValueError, 'offline metadata missing'):
+                workflow.select_sources(workflow.parse_args(['--reference-dataset', 'gdb13']), 'd4')
+
     def test_default_plan_and_explicit_aliases_keep_splits_separate(self):
         args = workflow.parse_args([])
         self.assertEqual(args.splits, ['train', 'validation', 'test'])
