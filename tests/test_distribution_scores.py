@@ -86,6 +86,28 @@ class DistributionScoreTests(unittest.TestCase):
         self.assertEqual(result['representations']['atom_details']['missing_seeds'], [0, 1])
         self.assertTrue(any('atom_details' in warning for warning in result['warnings']))
 
+    def test_zinc_scores_and_inference_exclude_mmff_but_keep_mmff_descriptors(self):
+        from compare_distribution_statistics import analyze_inputs
+        for dataset in ('zinc', 'zinc250k', 'zinc_atom_details', 'zinc250k_atom_details'):
+            with self.subTest(dataset=dataset):
+                report = fake_report()
+                report['metadata']['reference_dataset'] = dataset
+                report['representations']['atom_details'] = deepcopy(report['representations']['mmff'])
+                result = scores.analyze_report(report, dict.fromkeys(scores.GROUPS, 1.))
+                self.assertEqual(set(result['representations']), {'base', 'atom_details'})
+                self.assertNotIn('mmff', result['ranking_macro_tvd'])
+                run = result['representations']['base']['runs'][0]
+                self.assertIsNotNone(run['descriptor_metrics']['node_mmff_type']['tvd'])
+                self.assertIsNotNone(run['macro_tvd'])
+                header = next(line for line in scores.wasserstein_markdown_lines(result)
+                              if line.startswith('| Descrittore'))
+                self.assertNotIn('MMFF', header)
+                inference = analyze_inputs({'test': result})
+                primary = [row for row in inference['tests'] if row['family'] == 'primary']
+                self.assertEqual(len(primary), 1)
+                self.assertEqual(primary[0]['comparison'], 'pairwise')
+                self.assertEqual({primary[0]['model_a'], primary[0]['model_b']}, {'base', 'atom_details'})
+
     def test_single_seed_has_undefined_std_and_duplicate_seed_fails(self):
         report = fake_report()
         report['representations']['base']['runs'].pop()

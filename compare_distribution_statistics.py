@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from score_generated_distributions import GROUPS, LABELS, NUMERIC_FIELDS
+from compare_three_representations import report_representations
 
 
 def holm_adjust(pvalues):
@@ -87,7 +88,9 @@ def permutation_comparison(samples, omnibus=False, max_permutations=20000, rng_s
     tolerance = 100 * np.finfo(float).eps * max(abs(observed), 1e-15) if math.isfinite(observed) else 0
     for allocation in allocations:
         value = statistic(*(pooled[list(group)] for group in allocation))
-        extreme += (math.isinf(value) if math.isinf(observed) else value >= observed - tolerance)
+        # NumPy comparisons return np.bool_; keep counts and derived p-values
+        # as Python scalars so the complete result can be serialized as JSON.
+        extreme += int(math.isinf(value) if math.isinf(observed) else value >= observed - tolerance)
         count += 1
     pvalue = extreme / count if exact else (extreme + 1) / (count + 1)
     floor = (2 / total if not omnibus and len(set(sizes)) == 1 else 1 / total) if exact else 1 / (count + 1)
@@ -115,7 +118,8 @@ def analyze_inputs(inputs, alpha=.05, max_permutations=20000, rng_seed=0):
         for target in targets:
             samples = {}
             seeds = {}
-            for name, entry in report["representations"].items():
+            for name in report_representations(report):
+                entry = report["representations"].get(name, {"runs": []})
                 values = [(run["seed"], target_values(run, target)) for run in entry["runs"]]
                 values = [(seed, value) for seed, value in values if value is not None]
                 if len({seed for seed, _ in values}) != len(values):
@@ -146,7 +150,7 @@ def analyze_inputs(inputs, alpha=.05, max_permutations=20000, rng_seed=0):
         selected = [row for row in rows if row["family"] == family]
         for row, adjusted in zip(selected, holm_adjust([row["p_raw"] for row in selected])):
             row["p_holm"] = adjusted
-            row["reject_at_alpha"] = adjusted <= alpha
+            row["reject_at_alpha"] = bool(adjusted <= alpha)
             row["holm_family_size"] = len(selected)
     return {"alpha": alpha, "contexts": contexts, "tests": rows, "warnings": warnings,
             "notes": [

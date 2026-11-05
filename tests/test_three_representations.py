@@ -44,6 +44,34 @@ class JointComparisonTests(unittest.TestCase):
         self.assertEqual(len(top.get_legend().get_texts()), 4)
         plt.close(figure)
 
+    def test_zinc_plots_and_csv_omit_the_mmff_representation(self):
+        aggregate = {'categorical': {name: {} for name in joint.analysis.CATEGORICAL_FIELDS},
+                     'counts': {'atom_symbols': {'C': 2, 'O': 1}}, 'substructure_presence': {}}
+        aggregate['categorical']['dataset_specific_atom_features'] = {}
+        report = {'schema_version': 2,
+                  'metadata': {'reference_dataset': 'zinc', 'reference_split': 'test', 'expected_seeds': [0]},
+                  'reference': aggregate,
+                  'representations': {name: {'runs': [{'seed': 0, 'generated': aggregate}]}
+                                      for name in joint.REPRESENTATIONS}}
+        reference, groups = joint.collect_distributions(report)
+        self.assertEqual(set(groups), {'base', 'atom_details'})
+        rows = joint.comparison_table('atom_symbols', reference, groups, 20)
+        figure = joint.plot_descriptor('atom_symbols', rows, 'Test')
+        bars = [c for c in figure.axes[0].containers if isinstance(c, BarContainer)]
+        self.assertEqual(len(bars), 3)
+        self.assertEqual(len(figure.axes[0].get_legend().get_texts()), 3)
+        self.assertNotIn('MMFF', figure.axes[0].get_title())
+        plt.close(figure)
+        def close(figure, stem, pdf):
+            plt.close(figure)
+            return []
+        with tempfile.TemporaryDirectory() as directory, patch.object(joint, 'save_figure', side_effect=close):
+            result = joint.make_plots(report, Path(directory), pdf=False)
+            header = (Path(directory) / 'comparison.csv').read_text().splitlines()[0]
+            self.assertNotIn('mmff_', header)
+            self.assertEqual(result['warnings'], [])
+            self.assertNotIn('mmff', result['tables']['atom_symbols'][0])
+
     def test_missing_representation_is_undefined_not_zero(self):
         groups = self.groups()
         groups['atom_details'] = []

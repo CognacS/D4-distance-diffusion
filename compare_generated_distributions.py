@@ -164,6 +164,12 @@ def resolve_dataset_name(name: str) -> str:
     return DATASET_NAME_ALIASES.get(name, name)
 
 
+def comparison_representations(dataset_name, representations):
+    """ZINC has no usable MMFF generation variant; descriptors remain available."""
+    family = re.sub(r"_(mmff|atom_details)$", "", resolve_dataset_name(dataset_name))
+    return tuple(name for name in representations if family != "zinc250k" or name != "mmff")
+
+
 def resolve_dataset_root(dataset_name: str, root_override: Optional[str]) -> str:
     if root_override is not None:
         return root_override
@@ -890,16 +896,20 @@ def representation_name(dataset_name: str) -> str:
 
 
 def experiment_paths(args, family: str, messages: List[str]) -> Dict[str, List[Path]]:
+    allowed = comparison_representations(family, ("base", "mmff", "atom_details"))
+    if "mmff" not in allowed and ("mmff" in args.representations or args.generated):
+        emit_warning("ZINC: excluding the unsupported MMFF representation; comparing available Base/Atom details runs", messages)
     if args.generated:
         result = {}
         for argument in args.generated:
             name, separator, path = argument.partition("=")
             if not separator or name not in {"base", "mmff", "atom_details"}:
                 name, path = representation_name(args.reference_dataset), argument
-            result.setdefault(name, []).append(Path(path))
+            if name in allowed:
+                result.setdefault(name, []).append(Path(path))
         return result
     result = {}
-    for name in args.representations:
+    for name in comparison_representations(family, args.representations):
         stem = f"{family}-{args.model}"
         suffixes = {"base": [""], "mmff": ["-mmff-v2", "-mmff"],
                     "atom_details": ["-atom-details-v2", "-atom_details-v2", "-atom_details", "-atom-details"]}[name]
@@ -1064,6 +1074,7 @@ def main() -> Optional[int]:
         "metadata": {"reference_dataset": dataset_name, "reference_root": str(root), "reference_split": split,
                      "reference_total_graphs": reference_size,
                      "expected_seeds": args.expected_seeds, "model": args.model,
+                     "representations": list(paths),
                      "max_reference": args.max_reference, "max_generated_per_seed": args.max_generated,
                      "subsampling_seed": args.seed, "output_file": str(output), "rdkit_version": Chem.rdBase.rdkitVersion},
         "notes": [

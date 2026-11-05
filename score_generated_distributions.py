@@ -26,7 +26,7 @@ import numpy as np
 from scipy.spatial.distance import jensenshannon
 from scipy.stats import wasserstein_distance
 
-from compare_three_representations import COLORS, LABELS, REPRESENTATIONS, distributions
+from compare_three_representations import COLORS, LABELS, distributions, report_representations
 
 
 GROUPS = {
@@ -127,7 +127,7 @@ def analyze_report(report, weights):
               "reference_quality": {key: report["reference"].get(key) for key in
                                     ["num_input_graphs", "num_valid_molecules", "mmff_coverage"]},
               "representations": {}, "warnings": list(report.get("warnings", []))}
-    for name in REPRESENTATIONS:
+    for name in report_representations(report):
         entry = report.get("representations", {}).get(name, {})
         runs = []
         seeds = [run["seed"] for run in entry.get("runs", [])]
@@ -167,7 +167,7 @@ def analyze_report(report, weights):
         result["representations"][name] = {"available_seeds": seeds, "missing_seeds": missing_seeds, "runs": runs, "summary": stats}
     for metric in ["macro_tvd", "macro_js_distance"]:
         result["ranking_" + metric] = sorted(
-            [name for name in REPRESENTATIONS if result["representations"][name]["summary"][metric]["mean"] is not None],
+            [name for name in result["representations"] if result["representations"][name]["summary"][metric]["mean"] is not None],
             key=lambda name: result["representations"][name]["summary"][metric]["mean"])
     if not result["ranking_macro_tvd"]:
         raise ValueError("No model has a complete, comparable composite score; inspect missing distributions")
@@ -217,17 +217,18 @@ def wasserstein_markdown_lines(result):
     fields = available_wasserstein_fields(result)
     if not fields:
         return lines + ["Nessuna distanza Wasserstein calcolabile dai dati disponibili.", ""]
-    lines += ["| Descrittore | Unità | Base | MMFF | Atom details | Minimo medio |",
-              "|---|---|---|---|---|---|"]
+    names = tuple(result["representations"])
+    lines += ["| Descrittore | Unità | " + " | ".join(LABELS[name] for name in names) + " | Minimo medio |",
+              "|" + "---|" * (len(names) + 3)]
     for field in fields:
         stats = {name: result["representations"].get(name, {}).get("summary", {}).get("descriptors", {})
-                 .get(field, {}).get("wasserstein", {}) for name in REPRESENTATIONS}
+                 .get(field, {}).get("wasserstein", {}) for name in names}
         means = {name: stat["mean"] for name, stat in stats.items() if stat.get("mean") is not None}
         minimum = min(means.values()) if means else None
         best = [LABELS[name] for name, value in means.items()
                 if math.isclose(value, minimum, abs_tol=1e-12, rel_tol=0)]
         cells = []
-        for name in REPRESENTATIONS:
+        for name in names:
             stat = stats[name]
             if stat.get("mean") is None:
                 cells.append("n/d (n=0)")

@@ -1,4 +1,7 @@
 """Analytic and reference checks of seed-level permutation inference."""
+import json
+from pathlib import Path
+import tempfile
 import unittest
 
 import numpy as np
@@ -66,6 +69,26 @@ class PermutationInferenceTests(unittest.TestCase):
         self.assertTrue(all(row['n_permutations'] == 20 for row in pairs))
         self.assertTrue(all(not row['reject_at_alpha'] for row in pairs))
         self.assertTrue(all(row['p_holm'] >= row['p_raw'] for row in result['tests']))
+
+    def test_exact_and_monte_carlo_outputs_use_json_compatible_scalars(self):
+        from compare_distribution_statistics import write_outputs
+        report = score_report()
+        # Only the primary target is needed to exercise omnibus and pairwise output.
+        for entry in report['representations'].values():
+            for run in entry['runs']:
+                run.update(macro_js_distance=None, group_tvd={}, descriptor_metrics={})
+        for limit in (20000, 7):
+            with self.subTest(max_permutations=limit), tempfile.TemporaryDirectory() as directory:
+                result = analyze_inputs({'test': report}, max_permutations=limit)
+                for row in result['tests']:
+                    self.assertIs(type(row['p_raw']), float)
+                    self.assertIs(type(row['reject_at_alpha']), bool)
+                write_outputs(result, Path(directory))
+                saved = json.loads((Path(directory) / 'statistics.json').read_text())
+                self.assertEqual(len(saved['tests']), 4)
+                self.assertTrue((Path(directory) / 'statistical_tests.csv').is_file())
+                self.assertTrue((Path(directory) / 'summary.md').is_file())
+                self.assertTrue((Path(directory) / 'primary_pvalues.png').is_file())
 
     def test_insufficient_or_nonfinite_replicates_are_not_tested(self):
         with self.assertRaises(ValueError):

@@ -174,6 +174,27 @@ class DistributionAnalysisTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             analysis.normalize_split('not_a_split')
 
+    def test_zinc_discovery_skips_mmff_even_when_generations_exist(self):
+        from argparse import Namespace
+        names = ['base', 'mmff', 'atom_details']
+        for dataset in ('qm9', 'gdb13', 'zinc', 'zinc250k', 'zinc_atom_details'):
+            for model in ('d4', 'midi'):
+                with self.subTest(dataset=dataset, model=model), redirect_stderr(io.StringIO()):
+                    family = analysis.resolve_dataset_name(dataset).removesuffix('_atom_details')
+                    args = Namespace(reference_dataset=dataset, model=model,
+                                     representations=names, generated=None,
+                                     checkpoints_root=self.root / 'checkpoints')
+                    for suffix in ('', '-mmff', '-atom_details'):
+                        folder = args.checkpoints_root / (family + '-' + model + suffix)
+                        folder.mkdir(parents=True, exist_ok=True)
+                        (folder / 'generated_graphs.pkl').touch()
+                    selected = analysis.experiment_paths(args, family, [])
+                    expected = ['base', 'atom_details'] if family == 'zinc250k' else names
+                    self.assertEqual(list(selected), expected)
+                    args.generated = [f'{name}=/explicit/{name}.pkl' for name in names]
+                    selected = analysis.experiment_paths(args, family, [])
+                    self.assertEqual(list(selected), expected)
+
     def test_cli_compares_three_representations_and_records_missing_seeds(self):
         datasets = {}
         graphs = [graph_from_smiles('CCO'), graph_from_smiles('CC[O-]')]

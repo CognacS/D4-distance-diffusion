@@ -69,6 +69,20 @@ def defined(record):
     return bool(record) and any(value is not None for value in record.values())
 
 
+def report_representations(report):
+    selected = report["metadata"].get("representations", REPRESENTATIONS)
+    return analysis.comparison_representations(
+        report["metadata"]["reference_dataset"], (name for name in REPRESENTATIONS if name in selected))
+
+
+def table_representations(rows):
+    return tuple(name for name in REPRESENTATIONS if rows and name in rows[0])
+
+
+def population_label(names):
+    return "Dataset + " + " + ".join(LABELS[name] for name in names)
+
+
 def collect_distributions(report):
     if report.get("schema_version") != 2 or "representations" not in report:
         raise ValueError("Serve il report multi-seed (schema_version=2) di compare_generated_distributions.py")
@@ -76,7 +90,7 @@ def collect_distributions(report):
     groups = {
         name: [{"seed": run["seed"], "distributions": distributions(run["generated"])}
                for run in report["representations"].get(name, {}).get("runs", [])]
-        for name in REPRESENTATIONS
+        for name in report_representations(report)
     }
     if not any(groups.values()):
         raise ValueError("Il report non contiene generazioni utilizzabili")
@@ -84,11 +98,11 @@ def collect_distributions(report):
 
 
 def comparison_table(field, reference, groups, top_k):
-    """One common support and category order for all four plotted populations."""
+    """One common support and category order for all selected populations."""
     ref = reference.get(field, {})
     selected_runs = {
         name: [run for run in groups[name] if defined(run["distributions"].get(field))]
-        for name in REPRESENTATIONS
+        for name in groups
     }
     supports = [ref] + [run["distributions"][field] for runs in selected_runs.values() for run in runs]
     support = {key for record in supports for key, value in record.items() if value is not None}
@@ -120,7 +134,7 @@ def comparison_table(field, reference, groups, top_k):
 def legend_handles(rows):
     reference_label = "Dataset" if rows and rows[0]["dataset"] is not None else "Dataset (non disponibile)"
     handles = [Patch(facecolor=COLORS["dataset"], label=reference_label)]
-    for name in REPRESENTATIONS:
+    for name in table_representations(rows):
         seeds = rows[0][name]["seeds"] if rows else []
         suffix = f"seed {', '.join(map(str, seeds))}" if seeds else "non disponibile"
         handles.append(Patch(facecolor=COLORS[name], label=f"{LABELS[name]} ({suffix})"))
@@ -129,18 +143,20 @@ def legend_handles(rows):
 
 def draw_grouped(ax, rows, field, show_labels=True):
     positions = list(range(len(rows)))
-    width = 0.19
-    ref = [(index - 1.5 * width, row["dataset"]) for index, row in enumerate(rows) if row["dataset"] is not None]
+    names = table_representations(rows)
+    width = .8 / (len(names) + 1)
+    center = len(names) / 2
+    ref = [(index - center * width, row["dataset"]) for index, row in enumerate(rows) if row["dataset"] is not None]
     if ref:
         ax.bar([p for p, _ in ref], [100 * value for _, value in ref], width, color=COLORS["dataset"])
-    for offset, name in enumerate(REPRESENTATIONS, 1):
+    for offset, name in enumerate(names, 1):
         available = [(index, row[name]) for index, row in enumerate(rows) if row[name]["mean"] is not None]
         if available:
-            ax.bar([index + (offset - 1.5) * width for index, _ in available],
+            ax.bar([index + (offset - center) * width for index, _ in available],
                    [100 * stat["mean"] for _, stat in available], width, color=COLORS[name])
             errorbars = [(index, stat) for index, stat in available if stat["std"] is not None]
             if errorbars:
-                ax.errorbar([index + (offset - 1.5) * width for index, _ in errorbars],
+                ax.errorbar([index + (offset - center) * width for index, _ in errorbars],
                             [100 * stat["mean"] for _, stat in errorbars],
                             yerr=[100 * stat["std"] for _, stat in errorbars],
                             fmt="none", ecolor="#252525", capsize=2, linewidth=0.8)
@@ -157,18 +173,21 @@ def plot_descriptor(field, rows, title):
         2, 1, figsize=(max(10, min(23, len(rows) * 0.9)), 8), sharex=True,
         gridspec_kw={"height_ratios": [2, 1]}, layout="constrained")
     draw_grouped(top, rows, field, show_labels=False)
-    top.set_title(title + "\nDataset + Base + MMFF + Atom details", pad=12)
+    names = table_representations(rows)
+    top.set_title(title + "\n" + population_label(names), pad=12)
     top.legend(handles=legend_handles(rows), loc="upper right", fontsize=9)
-    for offset, name in enumerate(REPRESENTATIONS):
+    width = .72 / max(len(names), 1)
+    center = (len(names) - 1) / 2
+    for offset, name in enumerate(names):
         available = [(index, row[name]) for index, row in enumerate(rows)
                      if row[name]["difference_percentage_points"] is not None]
         if available:
-            difference.bar([index + (offset - 1) * 0.24 for index, _ in available],
+            difference.bar([index + (offset - center) * width for index, _ in available],
                            [stat["difference_percentage_points"] for _, stat in available],
-                           0.24, color=COLORS[name])
+                           width, color=COLORS[name])
             errorbars = [(index, stat) for index, stat in available if stat["std"] is not None]
             if errorbars:
-                difference.errorbar([index + (offset - 1) * 0.24 for index, _ in errorbars],
+                difference.errorbar([index + (offset - center) * width for index, _ in errorbars],
                                     [stat["difference_percentage_points"] for _, stat in errorbars],
                                     yerr=[100 * stat["std"] for _, stat in errorbars],
                                     fmt="none", ecolor="#252525", capsize=2, linewidth=0.8)
@@ -195,6 +214,7 @@ def save_figure(figure, stem, pdf):
 
 def make_plots(report, output_dir, top_k=20, pdf=True):
     reference, groups = collect_distributions(report)
+    names = tuple(groups)
     warnings = list(report.get("warnings", []))
     expected = set(report["metadata"].get("expected_seeds", [0, 1, 2]))
     for name, runs in groups.items():
@@ -212,7 +232,7 @@ def make_plots(report, output_dir, top_k=20, pdf=True):
         tables[field] = rows
         if rows[0]["dataset"] is None:
             warnings.append(f"{field}: distribuzione del dataset non disponibile")
-        missing_fields = [LABELS[name] for name in REPRESENTATIONS if not rows[0][name]["n"]]
+        missing_fields = [LABELS[name] for name in names if not rows[0][name]["n"]]
         if missing_fields:
             warnings.append(f"{field}: distribuzione non disponibile per {', '.join(missing_fields)}")
         figure = plot_descriptor(field, rows, TITLES.get(field, field.replace("_", " ")))
@@ -231,26 +251,26 @@ def make_plots(report, output_dir, top_k=20, pdf=True):
             ax.set_visible(False)
         metadata = report["metadata"]
         figure.suptitle(f"{metadata['reference_dataset']} — {metadata['reference_split'] or 'full'}\n"
-                       "Dataset + Base + MMFF + Atom details · media e deviazione standard tra seed", fontsize=17)
+                       f"{population_label(names)} · media e deviazione standard tra seed", fontsize=17)
         paths.extend(save_figure(figure, output_dir / "overview", pdf))
 
     csv_path = output_dir / "comparison.csv"
     with csv_path.open("w", newline="") as stream:
         columns = ["descriptor", "category", "dataset"] + [
-            f"{name}_{key}" for name in REPRESENTATIONS
+            f"{name}_{key}" for name in names
             for key in ["mean", "std", "n", "difference_percentage_points"]]
         writer = csv.DictWriter(stream, fieldnames=columns)
         writer.writeheader()
         for field, rows in tables.items():
             for row in rows:
                 writer.writerow({"descriptor": field, "category": row["category"], "dataset": row["dataset"],
-                                 **{f"{name}_{key}": row[name][key] for name in REPRESENTATIONS
+                                 **{f"{name}_{key}": row[name][key] for name in names
                                     for key in ["mean", "std", "n", "difference_percentage_points"]}})
     for message in warnings:
         print("WARNING:", message, file=sys.stderr)
     return {"metadata": report["metadata"], "warnings": warnings, "tables": tables,
             "plot_files": paths, "csv_file": str(csv_path),
-            "notes": ["All four populations share category order, support and axes.",
+            "notes": ["All selected populations share category order, support and axes.",
                       "Frequencies are fractions in JSON/CSV and percentages in figures; differences are percentage points.",
                       "Seed means have equal weights; std uses n-1 and is undefined for one seed.",
                       "Missing distributions are undefined, never replaced by zero-probability populations.",
@@ -301,7 +321,7 @@ def main():
     result["source_report"] = str(source)
     result["source_report_sha256"] = source_hash
     (output_dir / "joint_comparison.json").write_text(json.dumps(result, indent=2, allow_nan=False))
-    print(f"Confronto Dataset + Base + MMFF + Atom details: {output_dir}")
+    print(f"Confronto {population_label(report_representations(report))}: {output_dir}")
     print(f"Panoramica: {output_dir / 'overview.png'}")
 
 

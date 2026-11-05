@@ -26,7 +26,9 @@ def fake_step(command, **kwargs):
         split = command[command.index('--reference-split') + 1]
         model = command[command.index('--model') + 1]
         write_json(output, {'metadata': {'reference_split': None if split == 'full' else split,
-                                        'model': model},
+                                        'model': model,
+                                        'representations': [source.split('=', 1)[0] for index, source in enumerate(command)
+                                                            if index and command[index - 1] == '--generated']},
                             'reference': {'num_input_graphs': 10, 'num_valid_molecules': 10}})
         return
     output = Path(command[command.index('--output-dir') + 1])
@@ -39,7 +41,7 @@ def fake_step(command, **kwargs):
                    'mmff_coverage': {'valid_molecule_fraction': 1.}}
         write_json(output / 'metrics.json', {'metadata': report['metadata'], 'representations': {
             name: {'available_seeds': [0, 1, 2], 'runs': [{'quality': quality}] * 3}
-            for name in workflow.LABELS}})
+            for name in report['metadata']['representations']}})
         (output / 'summary.md').write_text('# Distanze\n\n[csv](wasserstein_summary.csv)\n'
                                            '![Wasserstein](wasserstein.png)\n'
                                            '[SciPy](https://docs.scipy.org/)\n\n## Dettagli\n')
@@ -132,6 +134,19 @@ class DistributionWorkflowTests(unittest.TestCase):
             self.assertEqual(run.call_count, 4)
             self.assertTrue((Path(directory) / 'gdb13/midi/test/REPORT.md').is_file())
             self.assertFalse((Path(directory) / 'gdb13/midi/train').exists())
+
+    def test_two_representation_report_names_only_the_compared_variants(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(workflow, 'select_sources', return_value=(['base=/base.pkl', 'atom_details=/details.pkl'], [])), \
+                patch.object(workflow.subprocess, 'run', side_effect=fake_step), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(workflow.main(['--reference-dataset', 'zinc', '--model', 'd4',
+                                           '--reference-split', 'test', '--output-root', directory]), 0)
+            report = (Path(directory) / 'zinc/d4/test/REPORT.md').read_text()
+            self.assertIn('Base + Atom details', report)
+            self.assertNotIn('Base + MMFF', report)
+            self.assertNotIn('| MMFF |', report)
+            self.assertNotIn('tre rappresentazioni', report)
 
     def test_failed_split_replaces_stale_report_and_other_splits_continue(self):
         with tempfile.TemporaryDirectory() as directory:

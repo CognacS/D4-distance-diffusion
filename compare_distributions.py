@@ -97,6 +97,7 @@ def scope_commands(args, model, split, directory, sources):
     analysis = [sys.executable, str(REPOSITORY / "compare_generated_distributions.py"),
                 "--reference-dataset", args.reference_dataset, "--reference-split", cache_split,
                 "--model", model, "--checkpoints-root", str(args.checkpoints_root),
+                "--representations", *args.representations,
                 "--expected-seeds", *map(str, args.expected_seeds), "--seed", str(args.seed),
                 "--output", str(raw), "--skip-plots"]
     for root in args.wandb_root:
@@ -154,8 +155,9 @@ def write_report(directory, dataset, model, split, messages=()):
     images = directory / "images"
     images.mkdir(exist_ok=True)
     selected_images = []
+    representations = " + ".join(LABELS[name] for name in scores["representations"])
     for source, filename, caption in (
-        (details / "distributions/overview.png", "overview.png", "Distribuzioni: dataset e tre rappresentazioni"),
+        (details / "distributions/overview.png", "overview.png", f"Distribuzioni: dataset + {representations}"),
         (details / "scores/ranking.png", "ranking.png", "Distanze complessive per seed"),
         (details / "scores/groups_tvd.png", "groups_tvd.png", "Distanze per famiglia di descrittori"),
     ):
@@ -167,7 +169,7 @@ def write_report(directory, dataset, model, split, messages=()):
     lines = [f"# Distribuzioni molecolari — {dataset} · {MODEL_LABELS[model]} · {split}", "",
              f"Riferimento: **{split}**; grafi analizzati: **{reference['num_input_graphs']}**; "
              f"molecole valide: **{reference['num_valid_molecules']}**.", "",
-             "Questo report confronta Base, MMFF e Atom details per un solo modello e un solo split. "
+             f"Questo report confronta {representations} per un solo modello e un solo split. "
              "Gli altri split sono valutati separatamente, usando gli stessi file di generazione.", "",
              "## Generazioni analizzate", "",
              "| Rappresentazione | Seed | Grafi analizzati | Validità media | Unicità media | Copertura MMFF media |",
