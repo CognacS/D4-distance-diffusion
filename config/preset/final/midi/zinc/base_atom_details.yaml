@@ -48,9 +48,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: zinc-midi-atom_details
+        group: zinc-midi-atom-details
 
-config_name: zinc-midi-atom_details
+config_name: zinc-midi-atom-details
 
 seed: 0
 

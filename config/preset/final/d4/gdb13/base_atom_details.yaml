@@ -46,9 +46,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: gdb13-d4-atom_details
+        group: gdb13-d4-atom-details
 
-config_name: gdb13-d4-atom_details
+config_name: gdb13-d4-atom-details
 
 mode: train+eval
 compile: false

@@ -51,9 +51,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: qm9-midi-atom_details
+        group: qm9-midi-atom-details
 
-config_name: qm9-midi-atom_details
+config_name: qm9-midi-atom-details
 
 seed: 0
 

@@ -48,9 +48,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: gdb13-midi-atom_details
+        group: gdb13-midi-atom-details
 
-config_name: gdb13-midi-atom_details
+config_name: gdb13-midi-atom-details
 
 seed: 0
 

@@ -46,9 +46,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: zinc-d4-atom_details
+        group: zinc-d4-atom-details
 
-config_name: zinc-d4-atom_details
+config_name: zinc-d4-atom-details
 
 mode: train+eval
 compile: false

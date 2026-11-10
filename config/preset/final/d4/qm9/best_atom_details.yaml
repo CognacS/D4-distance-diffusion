@@ -45,9 +45,9 @@ method:
 logger:
     WandbLogger:
         project: d4-hparams
-        group: qm9-d4-atom_details
+        group: qm9-d4-atom-details
 
-config_name: qm9-d4-atom_details
+config_name: qm9-d4-atom-details
 
 mode: train+eval
 compile: false
