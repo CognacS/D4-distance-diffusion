@@ -47,5 +47,5 @@ logger:
 config_name: qm9-d4
 
 mode: train+eval
-compile: true
+compile: false
 seed: 0
