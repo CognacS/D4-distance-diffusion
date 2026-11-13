@@ -172,13 +172,13 @@ def write_report(directory, dataset, model, split, messages=()):
              f"Questo report confronta {representations} per un solo modello e un solo split. "
              "Gli altri split sono valutati separatamente, usando gli stessi file di generazione.", "",
              "## Generazioni analizzate", "",
-             "| Rappresentazione | Seed | Grafi analizzati | Validità media | Unicità media | Copertura MMFF media |",
-             "|---|---|---:|---:|---:|---:|"]
+             "| Rappresentazione | Numero seed | ID seed | Grafi analizzati | Validità media | Unicità media | Copertura MMFF media |",
+             "|---|---:|---|---:|---:|---:|---:|"]
     for name, entry in scores["representations"].items():
         quality = [run["quality"] for run in entry["runs"]]
         count = sum(item.get("num_input_graphs") or 0 for item in quality)
         coverage = [(item.get("mmff_coverage") or {}).get("valid_molecule_fraction") for item in quality]
-        lines.append(f"| {LABELS[name]} | {', '.join(map(str, entry['available_seeds'])) or 'nessuno'} | "
+        lines.append(f"| {LABELS[name]} | {len(entry['runs'])} | {', '.join(map(str, entry['available_seeds'])) or 'nessuno'} | "
                      f"{count} | {percent([item.get('valid_fraction') for item in quality])} | "
                      f"{percent([item.get('uniqueness_fraction') for item in quality])} | {percent(coverage)} |")
     if selected_images:

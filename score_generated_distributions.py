@@ -208,6 +208,11 @@ def available_wasserstein_fields(result):
         for entry in result["representations"].values()))
 
 
+def plot_representations(result):
+    """Keep categorical axes stable regardless of ranking or JSON key order."""
+    return [name for name in report_representations(result) if name in result["representations"]]
+
+
 def wasserstein_markdown_lines(result):
     """Show every available numeric distance in the human-readable score report."""
     lines = ["", "## Wasserstein-1 per descrittore", "",
@@ -269,8 +274,9 @@ def write_wasserstein_outputs(result, directory):
     rows = math.ceil(len(fields) / 2)
     figure, axes = plt.subplots(rows, 2, figsize=(13, rows * 2.6), squeeze=False, layout="constrained")
     for ax, field in zip(axes.flat, fields):
-        names = [name for name, entry in result["representations"].items()
-                 if entry["summary"]["descriptors"].get(field, {}).get("wasserstein", {}).get("n", 0)]
+        names = [name for name in plot_representations(result)
+                 if result["representations"][name]["summary"]["descriptors"]
+                 .get(field, {}).get("wasserstein", {}).get("n", 0)]
         upper = 0.
         for index, name in enumerate(names):
             entry = result["representations"][name]
@@ -297,7 +303,7 @@ def write_wasserstein_outputs(result, directory):
 
 
 def draw_plots(result, directory):
-    order = result["ranking_macro_tvd"]
+    order = plot_representations(result)
     figure, axes = plt.subplots(1, 2, figsize=(13, 4.4), layout="constrained")
     for ax, metric, title in zip(axes, ["macro_tvd", "macro_js_distance"], ["TVD complessiva (principale)", "Jensen–Shannon (secondaria)"]):
         upper = 0

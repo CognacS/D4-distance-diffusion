@@ -159,7 +159,7 @@ def analyze_inputs(inputs, alpha=.05, max_permutations=20000, rng_seed=0):
                 "Null hypothesis: exchangeable seed-score distributions across models; the pairwise statistic is the absolute mean difference.",
                 "Omnibus statistic is ANOVA F with a permutation null, not a parametric F-distribution approximation.",
                 "Holm families span all input references: primary includes macro-TVD omnibus and pairwise tests; all other tests form a separate exploratory family.",
-                "Pairwise exact two-sided tests with three seeds per model have minimum p=2/binomial(6,3)=0.10 before adjustment.",
+                "Permutation p-value resolution depends on the actual sample sizes; inspect sample_sizes and p_resolution_lower_bound for each test.",
                 "Failing to reject does not establish equivalence. More independent training seeds are needed for greater power.",
                 "References are evaluated separately; this script does not test train versus test or re-estimate molecule-level sampling uncertainty.",
                 "Different reference sample sizes change empirical-distance noise. Train and test scores cannot be interpreted as identically calibrated samples.",
@@ -169,30 +169,42 @@ def analyze_inputs(inputs, alpha=.05, max_permutations=20000, rng_seed=0):
                 "holm": "https://stat.ethz.ch/R-manual/R-devel/library/stats/html/p.adjust.html"}}
 
 
-def write_outputs(result, directory):
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "statistics.json").write_text(json.dumps(result, indent=2, allow_nan=False))
-    if result["tests"]:
-        columns = [key for key in result["tests"][0] if key not in {"seed_ids", "sample_sizes"}]
-        with (directory / "statistical_tests.csv").open("w", newline="") as stream:
-            writer = csv.DictWriter(stream, fieldnames=columns)
-            writer.writeheader()
-            writer.writerows({key: row[key] for key in columns} for row in result["tests"])
+def statistics_markdown(result):
+    """Render actual seed counts and permutation resolution from saved tests."""
     lines = ["# Test statistici sulle differenze tra modelli", "",
              "Unità sperimentale: seed indipendente di training, con riferimento fissato. Soglia alpha: " + str(result["alpha"]) + ".", "",
              "Test di permutazione; confronti a coppie bilaterali. Holm corregge insieme i confronti primari di tutti i riferimenti forniti.", "",
-             "| Riferimento | Confronto TVD complessiva | Differenza media A−B | p grezzo | p Holm | Rifiuto H0 |",
-             "|---|---|---:|---:|---:|---|"]
+             "| Riferimento | Confronto TVD complessiva | Seed per gruppo | Differenza media A−B | p grezzo | p Holm | Rifiuto H0 |",
+             "|---|---|---|---:|---:|---:|---|"]
     primary = [row for row in result["tests"] if row["family"] == "primary"]
     for row in primary:
-        label = "Omnibus (tre modelli)" if row["comparison"] == "omnibus" else LABELS[row["model_a"]] + " vs " + LABELS[row["model_b"]]
+        label = f"Omnibus ({len(row['sample_sizes'])} rappresentazioni)" if row["comparison"] == "omnibus" else LABELS[row["model_a"]] + " vs " + LABELS[row["model_b"]]
         difference = "—" if row["mean_difference_a_minus_b"] is None else f"{row['mean_difference_a_minus_b']:.7f}"
-        lines.append(f"| {row['reference']} | {label} | {difference} | {row['p_raw']:.4f} | {row['p_holm']:.4f} | "
+        sizes = " / ".join(map(str, row["sample_sizes"]))
+        lines.append(f"| {row['reference']} | {label} | {sizes} | {difference} | {row['p_raw']:.4f} | {row['p_holm']:.4f} | "
                      + ("Sì" if row["reject_at_alpha"] else "No") + " |")
+    pairwise = [row for row in primary if row["comparison"] == "pairwise"]
+    if pairwise:
+        lines += ["", "### Numerosità e risoluzione dei test", "",
+                  "| Riferimento | Seed per gruppo | Metodo | Permutazioni | Limite inferiore p grezzo |",
+                  "|---|---|---|---:|---:|"]
+        shown = set()
+        for row in pairwise:
+            key = (row["reference"], tuple(row["sample_sizes"]), row["method"],
+                   row["n_permutations"], row["p_resolution_lower_bound"])
+            if key in shown:
+                continue
+            shown.add(key)
+            sizes = " / ".join(map(str, row["sample_sizes"]))
+            method = "esatto" if row["method"] == "exact_permutation" else "Monte Carlo"
+            lines.append(f"| {row['reference']} | {sizes} | {method} | {row['n_permutations']} | "
+                         f"{row['p_resolution_lower_bound']:.7f} |")
+        lines += ["", "Il limite indica la risoluzione del test, prima di Holm; non è il p-value osservato."]
+        if any(row["p_resolution_lower_bound"] > result["alpha"] for row in pairwise):
+            lines += ["Alcuni confronti non possono raggiungere alpha con la risoluzione disponibile."]
     lines += ["", "Una differenza media negativa favorisce A, perché una distanza più bassa è migliore.", "",
-              "**Con tre seed contro tre il p-value esatto bilaterale minimo è 0.10:** questi confronti a coppie non possono rifiutare H0 a 0.05.",
               "Un test omnibus può avere una risoluzione diversa; un eventuale risultato globale non identifica da solo la coppia differente.",
-              "Nessun rifiuto non significa che i modelli siano equivalenti: la potenza con tre seed è limitata.", "",
+              "Nessun rifiuto non significa che i modelli siano equivalenti: la potenza dipende dai seed disponibili e dalla variabilità tra run.", "",
               "## Dettagli", "",
               "Il CSV include test esplorativi sulle famiglie TVD, Jensen–Shannon complessiva e Wasserstein per descrittore numerico.",
               "Gli esplorativi hanno una famiglia Holm separata. I punteggi dei singoli descrittori non sono repliche di training.",
@@ -202,7 +214,21 @@ def write_outputs(result, directory):
               "Le diverse numerosità dei riferimenti influenzano le distanze empiriche e la loro variabilità.", ""]
     lines += [f"- [{name}]({url})" for name, url in result["sources"].items()]
     lines += ["", "## Avvisi", ""] + [f"- {message}" for message in result["warnings"]]
-    (directory / "summary.md").write_text("\n".join(lines) + "\n")
+    return "\n".join(lines) + "\n"
+
+
+def write_outputs(result, directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "statistics.json").write_text(json.dumps(result, indent=2, allow_nan=False))
+    if result["tests"]:
+        columns = [key for key in result["tests"][0] if key != "seed_ids"]
+        with (directory / "statistical_tests.csv").open("w", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=columns)
+            writer.writeheader()
+            writer.writerows({key: (" / ".join(map(str, row[key])) if key == "sample_sizes" else row[key])
+                              for key in columns} for row in result["tests"])
+    (directory / "summary.md").write_text(statistics_markdown(result))
+    primary = [row for row in result["tests"] if row["family"] == "primary"]
     pairwise = [row for row in primary if row["comparison"] == "pairwise"]
     if pairwise:
         figure, ax = plt.subplots(figsize=(10, max(4, len(pairwise) * .55)), layout="constrained")

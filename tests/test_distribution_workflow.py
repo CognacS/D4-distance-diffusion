@@ -57,6 +57,14 @@ def fake_step(command, **kwargs):
 
 
 class DistributionWorkflowTests(unittest.TestCase):
+    def test_six_seed_selection_is_forwarded_to_each_reference_split(self):
+        args = workflow.parse_args(['--expected-seeds', '0', '1', '2', '3', '4', '5'])
+        for split in ['train', 'validation', 'test']:
+            command = workflow.scope_commands(args, 'd4', split, Path('/output'), ['base=/samples.pkl'])[0][1]
+            start = command.index('--expected-seeds') + 1
+            end = command.index('--seed')
+            self.assertEqual(command[start:end], ['0', '1', '2', '3', '4', '5'])
+
     def test_explicit_wandb_roots_are_forwarded_to_analysis(self):
         args = workflow.parse_args(['--wandb-root', '/remote/logs', '--wandb-root', '/remote/archive'])
         self.assertEqual(args.wandb_root, [Path('/remote/logs'), Path('/remote/archive')])

@@ -83,6 +83,17 @@ class DistributionAnalysisTests(unittest.TestCase):
         self.assertEqual(Path(runs[0]['generated_file']), newer)
         self.assertEqual(len(messages), 2)
 
+    def test_discovery_preserves_six_seeds_after_version_renaming(self):
+        for seed in range(6):
+            file = self.make_run(f'v3_run{seed}', seed)
+            file.parent.rename(file.parent.with_name(f'v{seed}_run{seed}'))
+        messages = []
+        runs = analysis.discover_runs([self.root / 'checkpoints/experiment'], self.root / 'checkpoints',
+                                      list(range(6)), messages)
+        self.assertEqual([run['seed'] for run in runs], list(range(6)))
+        self.assertEqual(len({run['generated_file'] for run in runs}), 6)
+        self.assertEqual(messages, [])
+
     def test_metadata_disagreement_fails(self):
         file = self.make_run('v0_conflict', 0)
         (file.parent / 'config.yaml').write_text('seed: 1\n')

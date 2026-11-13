@@ -40,6 +40,25 @@ class RunMetadataTests(unittest.TestCase):
         self.metadata(self.checkpoints / "wandb", "run-20261102-glejzg5c", 1)
         self.assertEqual(read_run_metadata(self.run, self.checkpoints)["seed"], 1)
 
+    def test_renamed_version_matches_online_and_offline_stable_id(self):
+        for prefix in ("run", "offline-run"):
+            with self.subTest(prefix=prefix):
+                self.metadata(self.checkpoints / "wandb", f"{prefix}-20261102-v3_glejzg5c", 0)
+                result = read_run_metadata(self.run, self.checkpoints)
+                self.assertEqual(result["seed"], 0)
+                self.assertTrue(any("v3_glejzg5c" in path for path in result["seed_sources"]))
+
+    def test_folder_version_never_overrides_saved_seed(self):
+        self.run = self.run.rename(self.run.with_name("v5_glejzg5c"))
+        self.metadata(self.checkpoints / "wandb", "run-20261102-v0_glejzg5c", 2)
+        self.assertEqual(read_run_metadata(self.run, self.checkpoints)["seed"], 2)
+
+    def test_conflicting_metadata_with_different_versions_fails(self):
+        self.metadata(self.checkpoints / "wandb", "run-20261102-v0_glejzg5c", 0)
+        self.metadata(self.checkpoints / "wandb", "run-20261103-v3_glejzg5c", 1)
+        with self.assertRaisesRegex(ValueError, "Conflicting"):
+            read_run_metadata(self.run, self.checkpoints)
+
     def test_offline_both_identity_formats(self):
         for identity in ("glejzg5c", "v0_glejzg5c"):
             with self.subTest(identity=identity):
@@ -70,6 +89,7 @@ class RunMetadataTests(unittest.TestCase):
 
     def test_unknown_seed_and_similar_unrelated_ids_are_not_guessed(self):
         self.metadata(self.checkpoints / "wandb", "run-20261102-otherglejzg5c", 1)
+        self.metadata(self.checkpoints / "wandb", "run-20261102-v3_otherglejzg5c", 2)
         result = read_run_metadata(self.run, self.checkpoints)
         self.assertIsNone(result["seed"])
         self.assertEqual(result["seed_sources"], [])

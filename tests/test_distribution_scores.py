@@ -1,7 +1,13 @@
 """Analytic checks of probability distances and transparent group aggregation."""
 from copy import deepcopy
 import math
+from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 import score_generated_distributions as scores
 from compare_generated_distributions import CATEGORICAL_FIELDS
@@ -128,6 +134,52 @@ class DistributionScoreTests(unittest.TestCase):
         weights['bonds'] = -1
         with self.assertRaises(ValueError):
             scores.analyze_report(report, weights)
+
+    def test_plot_axes_stay_canonical_when_rankings_and_json_order_differ(self):
+        report = fake_report()
+        report['representations']['atom_details'] = deepcopy(report['representations']['base'])
+        for run in report['representations']['atom_details']['runs']:
+            run['generated'] = aggregate(.4)
+        result = scores.analyze_report(report, dict.fromkeys(scores.GROUPS, 1.))
+        # Deliberately make insertion order and ranking differ from display order.
+        result['representations'] = {name: result['representations'][name]
+                                     for name in ['atom_details', 'mmff', 'base']}
+        self.assertEqual(result['ranking_macro_tvd'], ['mmff', 'base', 'atom_details'])
+        original = deepcopy(result)
+        figures = {}
+        def capture(figure, directory, name):
+            figures[name] = figure
+        with tempfile.TemporaryDirectory() as directory, patch.object(scores, 'save_figure', side_effect=capture):
+            try:
+                scores.draw_plots(result, Path(directory))
+                scores.write_wasserstein_outputs(result, Path(directory))
+                for name in ['groups_tvd', 'descriptors_tvd']:
+                    ax = figures[name].axes[0]
+                    self.assertEqual([tick.get_text() for tick in ax.get_xticklabels()],
+                                     ['Base', 'MMFF', 'Atom details'])
+                matrix = np.asarray(figures['groups_tvd'].axes[0].images[0].get_array())
+                expected = [[result['representations'][name]['summary']['group_tvd'][group]['mean']
+                             for name in ['base', 'mmff', 'atom_details']] for group in scores.GROUPS]
+                np.testing.assert_allclose(matrix, expected)
+                for ax in figures['ranking'].axes:
+                    self.assertEqual([tick.get_text().split(' (n=')[0] for tick in ax.get_yticklabels()],
+                                     ['Base', 'MMFF', 'Atom details'])
+                for ax in figures['wasserstein'].axes:
+                    if ax.get_visible():
+                        self.assertEqual([tick.get_text() for tick in ax.get_yticklabels()],
+                                         ['Base', 'MMFF', 'Atom details'])
+                self.assertEqual(result, original)
+            finally:
+                for figure in figures.values():
+                    plt.close(figure)
+
+    def test_plot_order_respects_zinc_and_missing_representations(self):
+        result = {'metadata': {'reference_dataset': 'zinc'},
+                  'representations': {'atom_details': {}, 'mmff': {}, 'base': {}}}
+        self.assertEqual(scores.plot_representations(result), ['base', 'atom_details'])
+        result['metadata']['reference_dataset'] = 'qm9'
+        del result['representations']['mmff']
+        self.assertEqual(scores.plot_representations(result), ['base', 'atom_details'])
 
 
 if __name__ == '__main__':

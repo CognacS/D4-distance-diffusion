@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 from scipy.stats import permutation_test
 
-from compare_distribution_statistics import holm_adjust, permutation_comparison, analyze_inputs
+from compare_distribution_statistics import holm_adjust, permutation_comparison, analyze_inputs, statistics_markdown
 from score_generated_distributions import GROUPS
 
 
@@ -37,6 +37,35 @@ class PermutationInferenceTests(unittest.TestCase):
         reference = permutation_test((a, b), lambda x, y: np.mean(x) - np.mean(y),
                                      vectorized=False, n_resamples=np.inf).pvalue
         self.assertAlmostEqual(permutation_comparison([a, b])['p_raw'], reference)
+
+    def test_six_seed_exact_test_keeps_every_observation(self):
+        result = permutation_comparison([[0.] * 6, [1.] * 6])
+        self.assertEqual(result['sample_sizes'], (6, 6))
+        self.assertEqual(result['n_permutations'], 924)
+        self.assertAlmostEqual(result['p_raw'], 2 / 924)
+        self.assertAlmostEqual(result['p_resolution_lower_bound'], 2 / 924)
+
+    def test_summary_uses_actual_sizes_and_resolution_without_changing_tests(self):
+        import copy
+        for count in (3, 6):
+            report = score_report()
+            for group_index, entry in enumerate(report['representations'].values()):
+                entry['runs'] = [dict(seed=seed, macro_tvd=group_index + seed / 100,
+                                     macro_js_distance=None, group_tvd={}, descriptor_metrics={})
+                                 for seed in range(count)]
+            result = analyze_inputs({'train': report}, max_permutations=2000)
+            original = copy.deepcopy(result)
+            text = statistics_markdown(result)
+            self.assertIn(f'| {count} / {count} / {count} |', text)
+            self.assertIn(f'| {count} / {count} |', text)
+            self.assertNotIn('Con tre seed', text)
+            self.assertEqual(result, original)
+            if count == 6:
+                self.assertIn('| 924 | 0.0021645 |', text)
+                self.assertNotIn('non possono raggiungere alpha', text)
+            else:
+                self.assertIn('| 20 | 0.1000000 |', text)
+                self.assertIn('non possono raggiungere alpha', text)
 
     def test_omnibus_constant_and_perfect_separation_are_handled(self):
         constant = permutation_comparison([[.2] * 3] * 3, omnibus=True)
